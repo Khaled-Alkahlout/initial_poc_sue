@@ -1,4 +1,4 @@
-# LLM-koppeling (dag 2)
+# LLM-koppeling
 
 Doel: meten welke contextinformatie het verschil maakt tussen een correcte en snellere herschrijving
 en een foute of nutteloze. Elke LLM-uitvoer gaat door hetzelfde framework als `run_validation.py`.
@@ -24,7 +24,7 @@ API-sleutel (van console.anthropic.com), alleen voor de huidige terminal:
 
 Zet de sleutel nooit in een bestand dat in git komt.
 
-## Draaien (database moet draaien, zie README.md stap 5)
+## Draaien (database moet draaien)
 
 1. Prompts bekijken, zonder API en zonder kosten:
    `python scripts/run_llm.py "<URI>" --dry-run`
