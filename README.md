@@ -1,5 +1,23 @@
 # SQL Rewrite Validator
 
+## Optionele queryselectie (single-agent POC)
+
+Er is een zelfstandige filtering- en prioriteringslaag toegevoegd vóór de bestaande
+contextopbouw. De vier cases krijgen daarvoor **fictieve workloadcijfers**; dit
+zijn geen gemeten databaseprestaties. Bestaande commando's behouden hun gedrag.
+
+```powershell
+python scripts/run_llm.py --selection-only --top-k 1
+python -m unittest discover -s tests -v
+```
+
+Offline selectie vereist alleen de bestaande dependency `sqlglot`, geen database
+of API-key, en schrijft geen bestanden. Met `--select-mock` en een testdatabase-URI
+gaat de selectie naar de bestaande pipeline. `--dry-run` blijft databasecontext
+verzamelen en is dus niet hetzelfde als `--selection-only`.
+
+Zie [architectuur](docs/architecture.md) en [contracten, regels en voorbeelden](docs/query_selection.md).
+
 Een validatieframework dat controleert of een herschreven SQL-query (bijvoorbeeld door een LLM) **geldig, resultaat-gelijk en aantoonbaar sneller** is dan het origineel, plus een testbank om herschrijvingen op grote schaal te laten maken en beoordelen.
 
 ---
@@ -126,6 +144,13 @@ De context wordt gebouwd in `llm/context.py` (`build_context`). De tabellen en k
 │   ├── run_validation.py         # mutatietest; bevat ook evaluate(), dat run_llm.py hergebruikt
 │   ├── run_llm.py                # LLM laten herschrijven en elk antwoord beoordelen
 │   └── analyse.py                # leest results/, maakt tabellen en figuren
+├── query_selection/              # onafhankelijke selectie vóór contextopbouw
+│   ├── models.py                 # telemetry, beslissingen en JSON-resultaat
+│   ├── policy.py                 # configureerbare uitsluitingen en top_k
+│   ├── selection.py              # pure eligibility, deduplicatie en ranking
+│   └── adapters.py               # gesimuleerde casetelemetrie en Case-koppeling
+├── tests/                        # offline unittest-tests, inclusief CLI-routing
+├── docs/                         # architectuur en queryselectiecontracten
 ├── cases/                        # wat er wordt getest
 │   ├── cases.py                  # de 4 Case-objecten, parametersets en alle handgemaakte herschrijvingen
 │   ├── classes/
@@ -384,6 +409,10 @@ Alles in één keer kan ook: laat `--cases` weg. Een LLM is niet deterministisch
 | `--cases` | alle vier | lijst van query's |
 | `--conditions` | alle vier | lijst van condities |
 | `--dry-run` | uit | alleen prompts opslaan |
+| `--selection-only` | uit | offline mockselectie als JSON; geen database, API of bestanden |
+| `--select-mock` | uit | selecteer cases met fictieve workloadgegevens vóór de bestaande pipeline |
+| `--top-k` | alle geschikte | maximaal aantal geselecteerde cases; vereist selectiemodus |
+| `--exclude-query`, `--exclude-schema`, `--exclude-table` | leeg | herhaalbare uitsluitingen in selectiemodus; schema's aanvullend op systeemdefaults |
 
 De kosten zijn te schatten uit de proefrun: het tokengebruik staat per antwoord in `responses/`.
 
