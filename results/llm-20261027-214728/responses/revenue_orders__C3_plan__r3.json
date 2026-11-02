@@ -1,0 +1,8 @@
+{
+  "text": "```sql\n-- name: revenue_orders\n-- owner: finance\n-- params: tenant_id, from, to\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nDe query is al minimaal: het is een enkelvoudige tabelscan met eenvoudige filters en zonder joins of aggregaties. De 8,7 ms komt vooral doordat de planner een bitmap scan op `tenant_id` doet en er ruim 23.000 rijen worden teruggegeven. Zonder nieuwe indexen levert een herschrijving geen betrouwbare winst op, dus geef ik de originele query ongewijzigd terug.",
+  "input_tokens": 1788,
+  "output_tokens": 442,
+  "seconds": 4.7,
+  "sql": "-- name: revenue_orders\n-- owner: finance\n-- params: tenant_id, from, to\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')",
+  "model": "claude-sonnet-5-5"
+}

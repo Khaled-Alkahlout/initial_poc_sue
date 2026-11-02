@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n   AND NOT bool_or(o.created_at IS NULL)\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s\n```\n\nDe orders-tabel wordt nu maar één keer gelezen en alleen voor klanten van de opgegeven tenant, in plaats van voor alle klanten via een gematerialiseerde CTE met aggregatie en sortering. `DISTINCT ON … created_at DESC` is vervangen door `max(created_at)`. De controle `NOT bool_or(created_at IS NULL)` behoudt het oorspronkelijke gedrag bij NULL-waarden, want daar sorteert NULL bovenaan en valt zo'n klant dus buiten het filter. `GROUP BY c.id` volstaat omdat de primaire sleutel de overige klantkolommen bepaalt.",
+  "input_tokens": 924,
+  "output_tokens": 1300,
+  "seconds": 13.0,
+  "sql": "SELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n   AND NOT bool_or(o.created_at IS NULL)\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s",
+  "model": "claude-sonnet-5-5"
+}

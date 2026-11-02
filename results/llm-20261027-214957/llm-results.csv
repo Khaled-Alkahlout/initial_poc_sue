@@ -1,0 +1,13 @@
+cand_iqr_ms,cand_median_ms,candidate,case,condition,detail,expected,failing_param_sets,faster,fault,flagged_not_equivalent,input_tokens,llm_seconds,model,orig_iqr_ms,orig_median_ms,output_tokens,param_sets,rep,reps,speedup,unchanged,verdict
+,,LLM_C1_query_r1,top_products,C1_query,big/full: VALUE_MISMATCH 1751 rijen verschillen; big/recent: ROWCOUNT_MISMATCH 1750 tegenover 1680 rijen; big/boundary: VALUE_MISMATCH 1751 rijen verschillen; small/full: VALUE_MISMATCH 1011 rijen verschillen; small/recent: ROWCOUNT_MISMATCH 1009 tegenover 980 rijen; small/boundary: VALUE_MISMATCH 1,unknown,6,,llm,True,824,14.8,claude-sonnet-5-5,,,1783,8,1,,,False,REJECTED_NOT_EQUIVALENT
+20.0,226.1,LLM_C1_query_r2,top_products,C1_query,,unknown,0,False,llm,False,824,10.5,claude-sonnet-5-5,23.7,157.2,1377,8,2,7,0.7,False,EQUIVALENT_NOT_FASTER
+13.7,232.4,LLM_C1_query_r3,top_products,C1_query,,unknown,0,False,llm,False,824,14.8,claude-sonnet-5-5,11.2,155.8,1220,8,3,7,0.67,False,EQUIVALENT_NOT_FASTER
+21.1,227.7,LLM_C2_schema_r1,top_products,C2_schema,,unknown,0,False,llm,False,2398,12.4,claude-sonnet-5-5,35.2,157.6,1624,8,1,7,0.69,False,EQUIVALENT_NOT_FASTER
+30.7,227.2,LLM_C2_schema_r2,top_products,C2_schema,,unknown,0,False,llm,False,2398,10.7,claude-sonnet-5-5,21.8,158.6,1466,8,2,7,0.7,False,EQUIVALENT_NOT_FASTER
+19.4,228.7,LLM_C2_schema_r3,top_products,C2_schema,,unknown,0,False,llm,False,2398,12.9,claude-sonnet-5-5,28.7,156.7,1686,8,3,7,0.68,False,EQUIVALENT_NOT_FASTER
+16.8,264.0,LLM_C3_plan_r1,top_products,C3_plan,,unknown,0,False,llm,False,4239,16.9,claude-sonnet-5-5,20.1,163.7,2193,8,1,7,0.62,False,EQUIVALENT_NOT_FASTER
+20.0,285.9,LLM_C3_plan_r2,top_products,C3_plan,,unknown,0,False,llm,False,4239,14.6,claude-sonnet-5-5,22.7,149.1,1930,8,2,7,0.52,False,EQUIVALENT_NOT_FASTER
+5.9,259.0,LLM_C3_plan_r3,top_products,C3_plan,,unknown,0,False,llm,False,4239,13.9,claude-sonnet-5-5,17.1,160.9,1849,8,3,7,0.62,False,EQUIVALENT_NOT_FASTER
+7.7,248.7,LLM_C4_stats_r1,top_products,C4_stats,,unknown,0,False,llm,False,7365,17.4,claude-sonnet-5-5,23.7,143.4,2201,8,1,7,0.58,False,EQUIVALENT_NOT_FASTER
+62.8,228.8,LLM_C4_stats_r2,top_products,C4_stats,,unknown,0,False,llm,False,7365,16.6,claude-sonnet-5-5,19.7,158.8,1685,8,2,7,0.69,False,EQUIVALENT_NOT_FASTER
+12.3,264.8,LLM_C4_stats_r3,top_products,C4_stats,,unknown,0,False,llm,False,7365,19.5,claude-sonnet-5-5,20.9,156.6,2414,8,3,7,0.59,False,EQUIVALENT_NOT_FASTER

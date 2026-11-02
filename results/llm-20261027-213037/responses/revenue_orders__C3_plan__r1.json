@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nIk zie geen zinvolle herschrijving. De query is al een kale selectie op `orders`, en het plan haalt ongeveer 90% van de rijen van de tenant op (23.610 van 26.264) in zo'n 6 ms. Zonder nieuwe indexen of schemawijzigingen valt er met herschrijven niets te winnen, dus geef ik de query ongewijzigd terug.",
+  "input_tokens": 1788,
+  "output_tokens": 388,
+  "seconds": 3.9,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')",
+  "model": "claude-sonnet-5-5"
+}

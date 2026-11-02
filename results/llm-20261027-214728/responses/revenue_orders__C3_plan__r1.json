@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivery')\n```\n\nCorrectie: hier staat per ongeluk `'delivery'` in plaats van `'delivered'`, dus gebruik deze versie:\n\n```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nIk heb de query inhoudelijk ongewijzigd gelaten. Hij is al een eenvoudige filterquery zonder joins of aggregaties en draait in ongeveer 9 ms. Een herschrijving levert geen winst op: de planner gebruikt al een bitmap scan op `tenant_id`, en een echte versnelling kan alleen via een betere index (bijvoorbeeld op `(tenant_id, created_at)`), en die mag ik hier niet voorstellen.",
+  "input_tokens": 1788,
+  "output_tokens": 612,
+  "seconds": 5.6,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivery')",
+  "model": "claude-sonnet-5-5"
+}

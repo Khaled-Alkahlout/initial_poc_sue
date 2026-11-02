@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nDeze query is al een eenvoudige, sargable selectie: alleen filters op één tabel, zonder joins, subqueries of sortering. Een herschrijving levert dus geen zinvolle winst op. Verdere versnelling kan alleen via een index, bijvoorbeeld op `(tenant_id, created_at)`, en die vallen buiten de regels. Daarom geef ik de query ongewijzigd terug.",
+  "input_tokens": 620,
+  "output_tokens": 344,
+  "seconds": 3.6,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')",
+  "model": "claude-sonnet-5-5"
+}

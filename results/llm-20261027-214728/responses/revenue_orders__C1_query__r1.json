@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nDeze query is al een eenvoudige selectie op één tabel met sargable predicaten (gelijkheid op tenant_id, een halfopen tijdsbereik en een korte IN-lijst), zonder joins, aggregaties of sortering. Een herschrijving levert daarom geen winst op; versnelling zit in een geschikte index, bijvoorbeeld op (tenant_id, created_at), en dat valt buiten de regels hier.",
+  "input_tokens": 620,
+  "output_tokens": 390,
+  "seconds": 6.1,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')",
+  "model": "claude-sonnet-5-5"
+}

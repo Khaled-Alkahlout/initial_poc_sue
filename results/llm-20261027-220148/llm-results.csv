@@ -1,0 +1,13 @@
+cand_iqr_ms,cand_median_ms,candidate,case,condition,detail,expected,failing_param_sets,faster,fault,flagged_not_equivalent,input_tokens,llm_seconds,model,orig_iqr_ms,orig_median_ms,output_tokens,param_sets,rep,reps,speedup,unchanged,verdict
+0.4,6.7,LLM_C1_query_r1,audit_log_page,C1_query,,unknown,0,False,llm,False,735,11.6,claude-sonnet-5-5,0.6,6.5,1031,8,1,7,0.97,True,EQUIVALENT_NOT_FASTER
+1.6,9.0,LLM_C1_query_r2,audit_log_page,C1_query,,unknown,0,False,llm,False,735,8.1,claude-sonnet-5-5,0.4,8.5,894,8,2,7,0.95,True,EQUIVALENT_NOT_FASTER
+0.4,8.3,LLM_C1_query_r3,audit_log_page,C1_query,,unknown,0,False,llm,False,735,7.8,claude-sonnet-5-5,0.8,8.6,856,8,3,7,1.04,False,EQUIVALENT_NOT_FASTER
+0.7,8.3,LLM_C2_schema_r1,audit_log_page,C2_schema,,unknown,0,False,llm,False,1285,9.8,claude-sonnet-5-5,1.4,8.2,1181,8,1,7,0.99,True,EQUIVALENT_NOT_FASTER
+0.9,8.6,LLM_C2_schema_r2,audit_log_page,C2_schema,,unknown,0,False,llm,False,1285,11.8,claude-sonnet-5-5,0.5,9.3,1310,8,2,7,1.08,True,EQUIVALENT_NOT_FASTER
+0.5,7.1,LLM_C2_schema_r3,audit_log_page,C2_schema,,unknown,0,False,llm,False,1285,7.6,claude-sonnet-5-5,1.0,7.3,901,8,3,7,1.02,True,EQUIVALENT_NOT_FASTER
+0.3,8.2,LLM_C3_plan_r1,audit_log_page,C3_plan,,unknown,0,False,llm,False,1803,5.5,claude-sonnet-5-5,0.5,8.1,688,8,1,7,0.99,True,EQUIVALENT_NOT_FASTER
+0.7,6.5,LLM_C3_plan_r2,audit_log_page,C3_plan,,unknown,0,False,llm,False,1803,5.7,claude-sonnet-5-5,1.0,6.6,724,8,2,7,1.01,True,EQUIVALENT_NOT_FASTER
+0.6,7.8,LLM_C3_plan_r3,audit_log_page,C3_plan,,unknown,0,False,llm,False,1803,5.2,claude-sonnet-5-5,0.5,8.2,657,8,3,7,1.06,True,EQUIVALENT_NOT_FASTER
+0.8,7.0,LLM_C4_stats_r1,audit_log_page,C4_stats,,unknown,0,False,llm,False,3066,5.5,claude-sonnet-5-5,0.8,7.0,652,8,1,7,1.01,True,EQUIVALENT_NOT_FASTER
+0.8,7.5,LLM_C4_stats_r2,audit_log_page,C4_stats,,unknown,0,False,llm,False,3066,4.8,claude-sonnet-5-5,0.2,7.7,558,8,2,7,1.02,False,EQUIVALENT_NOT_FASTER
+0.9,7.6,LLM_C4_stats_r3,audit_log_page,C4_stats,,unknown,0,False,llm,False,3066,5.5,claude-sonnet-5-5,1.3,7.8,633,8,3,7,1.03,True,EQUIVALENT_NOT_FASTER

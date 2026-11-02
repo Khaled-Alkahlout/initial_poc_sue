@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s\n```\n\nDe drie keer scannen van de gematerialiseerde CTE en de geneste lus met ~48 miljoen weggefilterde rijen zijn vervangen door één join en één aggregatie per klant. Omdat `last_order_at` gelijk is aan `max(created_at)` over dezelfde orders, volstaat een HAVING en is de `DISTINCT ON` niet meer nodig. Het tenantfilter op `customers` wordt nu vóór de aggregatie toegepast, en de kolommen, rijen en sortering blijven gelijk aan het origineel.",
+  "input_tokens": 3478,
+  "output_tokens": 1006,
+  "seconds": 8.4,
+  "sql": "SELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s",
+  "model": "claude-sonnet-5-5"
+}

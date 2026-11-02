@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nIk zie geen zinvolle verbetering, dus de query is ongewijzigd teruggegeven. Hij is al minimaal: er is geen join, aggregatie of overbodige kolom, en de planner haalt in 10 ms ongeveer 23.600 rijen op via een bitmap scan. Zonder nieuwe indexen (bijvoorbeeld op `(tenant_id, created_at)`) levert een herschrijving geen winst op.",
+  "input_tokens": 2339,
+  "output_tokens": 452,
+  "seconds": 4.4,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')",
+  "model": "claude-sonnet-5-5"
+}

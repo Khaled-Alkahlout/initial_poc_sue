@@ -1,0 +1,8 @@
+{
+  "text": "Deze query is al een simpele gefilterde scan zonder joins, aggregaties of subqueries. Een herschrijving verandert niets aan het plan. Verbetering zit in indexen (bijvoorbeeld op `(tenant_id, created_at)`), maar die zijn niet toegestaan. Ik geef de query daarom ongewijzigd terug.\n\n```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivery')\n```\n\nLet op: ik heb hierboven per ongeluk 'delivered' veranderd in 'delivery'. Dit is de correcte, ongewijzigde query:\n\n```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nEen herschrijving levert hier geen winst op. Een index op `(tenant_id, created_at)` zou wel helpen, maar die mag ik niet voorstellen als wijziging in de query.",
+  "input_tokens": 1297,
+  "output_tokens": 521,
+  "seconds": 5.1,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivery')",
+  "model": "claude-sonnet-5-5"
+}

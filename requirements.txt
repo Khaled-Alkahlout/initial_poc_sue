@@ -1,0 +1,4 @@
+pgserver
+psycopg[binary]
+sqlglot
+anthropic

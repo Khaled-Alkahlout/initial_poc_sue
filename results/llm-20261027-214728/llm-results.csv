@@ -1,0 +1,13 @@
+cand_iqr_ms,cand_median_ms,candidate,case,condition,detail,expected,failing_param_sets,faster,fault,flagged_not_equivalent,input_tokens,llm_seconds,model,orig_iqr_ms,orig_median_ms,output_tokens,param_sets,rep,reps,speedup,unchanged,verdict
+2.4,35.9,LLM_C1_query_r1,revenue_orders,C1_query,,unknown,0,False,llm,False,620,6.1,claude-sonnet-5-5,0.7,35.7,390,8,1,7,1.0,False,EQUIVALENT_NOT_FASTER
+3.3,34.5,LLM_C1_query_r2,revenue_orders,C1_query,,unknown,0,False,llm,False,620,3.9,claude-sonnet-5-5,2.2,34.5,354,8,2,7,1.0,False,EQUIVALENT_NOT_FASTER
+1.5,34.5,LLM_C1_query_r3,revenue_orders,C1_query,,unknown,0,False,llm,False,620,3.6,claude-sonnet-5-5,2.8,34.7,344,8,3,7,1.0,False,EQUIVALENT_NOT_FASTER
+3.4,33.0,LLM_C2_schema_r1,revenue_orders,C2_schema,,unknown,0,False,llm,False,1297,3.3,claude-sonnet-5-5,3.2,32.7,266,8,1,7,0.99,False,EQUIVALENT_NOT_FASTER
+1.5,32.8,LLM_C2_schema_r2,revenue_orders,C2_schema,,unknown,0,False,llm,False,1297,4.1,claude-sonnet-5-5,0.9,32.1,312,8,2,7,0.98,False,EQUIVALENT_NOT_FASTER
+,,LLM_C2_schema_r3,revenue_orders,C2_schema,big/full: ROWCOUNT_MISMATCH 23610 tegenover 11780 rijen; big/recent: ROWCOUNT_MISMATCH 5438 tegenover 2784 rijen; big/boundary: ROWCOUNT_MISMATCH 23609 tegenover 11780 rijen; small/full: ROWCOUNT_MISMATCH 13680 tegenover 6925 rijen; small/recent: ROWCOUNT_MISMATCH 3163 tegenover 1623 rijen; small/bo,unknown,6,,llm,True,1297,5.1,claude-sonnet-5-5,,,521,8,3,,,False,REJECTED_NOT_EQUIVALENT
+,,LLM_C3_plan_r1,revenue_orders,C3_plan,big/full: ROWCOUNT_MISMATCH 23610 tegenover 11780 rijen; big/recent: ROWCOUNT_MISMATCH 5438 tegenover 2784 rijen; big/boundary: ROWCOUNT_MISMATCH 23609 tegenover 11780 rijen; small/full: ROWCOUNT_MISMATCH 13680 tegenover 6925 rijen; small/recent: ROWCOUNT_MISMATCH 3163 tegenover 1623 rijen; small/bo,unknown,6,,llm,True,1788,5.6,claude-sonnet-5-5,,,612,8,1,,,False,REJECTED_NOT_EQUIVALENT
+2.5,34.0,LLM_C3_plan_r2,revenue_orders,C3_plan,,unknown,0,False,llm,False,1788,4.2,claude-sonnet-5-5,2.3,32.3,400,8,2,7,0.95,False,EQUIVALENT_NOT_FASTER
+1.3,32.5,LLM_C3_plan_r3,revenue_orders,C3_plan,,unknown,0,False,llm,False,1788,4.7,claude-sonnet-5-5,3.8,32.0,442,8,3,7,0.98,False,EQUIVALENT_NOT_FASTER
+2.2,33.4,LLM_C4_stats_r1,revenue_orders,C4_stats,,unknown,0,False,llm,False,2339,4.7,claude-sonnet-5-5,2.2,32.6,517,8,1,7,0.98,True,EQUIVALENT_NOT_FASTER
+0.5,32.1,LLM_C4_stats_r2,revenue_orders,C4_stats,,unknown,0,False,llm,False,2339,4.4,claude-sonnet-5-5,2.2,32.3,452,8,2,7,1.01,False,EQUIVALENT_NOT_FASTER
+1.3,32.5,LLM_C4_stats_r3,revenue_orders,C4_stats,,unknown,0,False,llm,False,2339,5.3,claude-sonnet-5-5,0.7,32.6,510,8,3,7,1.0,False,EQUIVALENT_NOT_FASTER

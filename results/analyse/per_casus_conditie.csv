@@ -1,0 +1,17 @@
+case,condition,n,ACCEPTED,"gelijk, geen winst",ongewijzigd,"gelijk, trager",fout,median_speedup
+top_products,C1_query,3,0,0,0,2,1,0.69
+top_products,C2_schema,3,0,0,0,3,0,0.69
+top_products,C3_plan,3,0,0,0,3,0,0.62
+top_products,C4_stats,3,0,0,0,3,0,0.59
+top_customers,C1_query,3,3,0,0,0,0,199.86
+top_customers,C2_schema,3,3,0,0,0,0,207.42
+top_customers,C3_plan,3,3,0,0,0,0,206.16
+top_customers,C4_stats,3,3,0,0,0,0,198.1
+audit_log_page,C1_query,3,0,0,3,0,0,0.97
+audit_log_page,C2_schema,3,0,0,3,0,0,1.02
+audit_log_page,C3_plan,3,0,0,3,0,0,1.01
+audit_log_page,C4_stats,3,0,0,3,0,0,1.02
+revenue_orders,C1_query,3,0,0,3,0,0,1.0
+revenue_orders,C2_schema,3,0,0,2,0,1,0.98
+revenue_orders,C3_plan,3,0,0,2,0,1,0.96
+revenue_orders,C4_stats,3,0,0,3,0,0,1.0

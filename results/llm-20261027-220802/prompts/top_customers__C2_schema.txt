@@ -1,0 +1,104 @@
+## Originele query
+```sql
+-- name: top_customers
+-- owner: sales
+-- params: tenant_id, from, to, limit
+-- Customers ranked by revenue, with their most recent order. Only customers
+-- whose last order falls inside the window are listed; this is what the
+-- account managers asked for ("who was active this quarter").
+WITH customer_orders AS MATERIALIZED (
+    SELECT o.customer_id,
+           o.id,
+           o.total_cents,
+           o.created_at
+      FROM orders o
+     WHERE o.status IN ('paid', 'processing', 'shipped', 'delivered')
+),
+totals AS (
+    SELECT customer_id,
+           sum(total_cents) AS revenue,
+           count(*)         AS order_count
+      FROM customer_orders
+     GROUP BY customer_id
+),
+last_order AS (
+    SELECT DISTINCT ON (customer_id)
+           customer_id,
+           created_at AS last_order_at
+      FROM customer_orders
+     ORDER BY customer_id, created_at DESC
+)
+SELECT c.id,
+       c.email,
+       c.company,
+       c.country_code,
+       t.revenue,
+       t.order_count,
+       lo.last_order_at
+  FROM customers c
+  JOIN totals     t  ON t.customer_id  = c.id
+  JOIN last_order lo ON lo.customer_id = c.id
+ WHERE c.tenant_id = %(tenant_id)s
+   AND lo.last_order_at >= %(from)s
+   AND lo.last_order_at <  %(to)s
+ ORDER BY t.revenue DESC
+ LIMIT %(limit)s
+```
+
+## Schema van de gebruikte tabellen (kolommen, constraints, indexen)
+```
+TABLE customers (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  external_ref text,
+  email text NOT NULL,
+  first_name text,
+  last_name text,
+  company text,
+  phone text,
+  country_code text,
+  vat_number text,
+  segment text NOT NULL,
+  is_deleted boolean NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  order_count integer NOT NULL,
+  lifetime_value_cents bigint NOT NULL,
+  last_order_at timestamp with time zone,
+  metadata jsonb NOT NULL
+)
+  CONSTRAINT CHECK (((country_code IS NULL) OR (country_code ~ '^[A-Z]{2}$'::text)))
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)
+TABLE orders (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  status text NOT NULL,
+  currency text NOT NULL,
+  subtotal_cents bigint NOT NULL,
+  discount_cents bigint NOT NULL,
+  shipping_cents bigint NOT NULL,
+  total_cents bigint NOT NULL,
+  shipping_address_id uuid,
+  billing_address_id uuid,
+  notes text,
+  channel text NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  promotion_id uuid,
+  reference text
+)
+  CONSTRAINT FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX orders_created_at_tenant_idx ON public.orders USING btree (created_at, tenant_id)
+  CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)
+  CREATE INDEX orders_total_eur_idx ON public.orders USING btree (tenant_id, ((total_cents / 100)) DESC)
+```
+
+Herschrijf de query zodat die sneller is en exact hetzelfde resultaat geeft.

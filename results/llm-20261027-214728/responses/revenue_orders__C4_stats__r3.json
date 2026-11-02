@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```\n\nIk zie geen zinvolle herschrijving: de query is al een kale filter-scan op één tabel, en de planner kiest een passend plan (bitmap-scan op `tenant_id`, 10 ms voor 23.610 rijen). Zonder nieuwe index kan ik de toegangsroute niet verbeteren, en trucs om de planner te sturen zijn fragiel en kunnen bij andere parameters (smal venster) slechter uitpakken. Daarom geef ik de originele query ongewijzigd terug.",
+  "input_tokens": 2339,
+  "output_tokens": 510,
+  "seconds": 5.3,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')",
+  "model": "claude-sonnet-5-5"
+}

@@ -1,0 +1,205 @@
+## Originele query
+```sql
+-- name: top_products
+-- owner: merchandising
+-- params: tenant_id, from, to, limit
+-- Best sellers by units and revenue. Line items reference the variant by its
+-- string id (integration feed), so it is cast when joining the catalog.
+SELECT p.id,
+       p.sku,
+       p.name,
+       p.brand,
+       p.currency,
+       count(DISTINCT o.id)        AS order_count,
+       sum(ol.quantity)            AS quantity,
+       sum(ol.line_total_cents)    AS revenue_cents,
+       count(DISTINCT pv.id)       AS variant_count
+  FROM order_lines ol
+  JOIN orders o           ON o.id = ol.order_id
+  JOIN product_variants pv ON pv.id = ol.variant_id::uuid
+  JOIN products p         ON p.id = pv.product_id
+ WHERE o.tenant_id = %(tenant_id)s
+   AND o.created_at >= %(from)s
+   AND o.created_at <  %(to)s
+   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')
+ GROUP BY p.id, p.sku, p.name, p.brand, p.currency
+ ORDER BY quantity DESC, revenue_cents DESC
+ LIMIT %(limit)s
+```
+
+## Schema van de gebruikte tabellen (kolommen, constraints, indexen)
+```
+TABLE order_lines (
+  id uuid NOT NULL,
+  order_id uuid NOT NULL,
+  product_id uuid,
+  variant_id text,
+  sku text NOT NULL,
+  name text NOT NULL,
+  quantity integer NOT NULL,
+  unit_price_cents bigint NOT NULL,
+  line_total_cents bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (product_id) REFERENCES products(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX order_lines_pkey ON public.order_lines USING btree (id)
+TABLE orders (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  status text NOT NULL,
+  currency text NOT NULL,
+  subtotal_cents bigint NOT NULL,
+  discount_cents bigint NOT NULL,
+  shipping_cents bigint NOT NULL,
+  total_cents bigint NOT NULL,
+  shipping_address_id uuid,
+  billing_address_id uuid,
+  notes text,
+  channel text NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  promotion_id uuid,
+  reference text
+)
+  CONSTRAINT FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX orders_created_at_tenant_idx ON public.orders USING btree (created_at, tenant_id)
+  CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)
+  CREATE INDEX orders_total_eur_idx ON public.orders USING btree (tenant_id, ((total_cents / 100)) DESC)
+TABLE product_variants (
+  id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  sku text NOT NULL,
+  name text NOT NULL,
+  price_cents bigint NOT NULL,
+  weight_grams integer,
+  is_active boolean NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  attributes jsonb NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX product_variants_pkey ON public.product_variants USING btree (id)
+TABLE products (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  category_id uuid,
+  sku text NOT NULL,
+  name text NOT NULL,
+  slug text NOT NULL,
+  description text,
+  thumbnail bytea,
+  brand text,
+  price_cents bigint NOT NULL,
+  currency text NOT NULL,
+  status text NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  view_count bigint NOT NULL,
+  last_viewed_at timestamp with time zone,
+  attributes jsonb NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (category_id) REFERENCES categories(id)
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX products_pkey ON public.products USING btree (id)
+```
+
+## Uitvoeringsplan van het origineel (EXPLAIN ANALYZE, BUFFERS) op representatieve parameters
+```
+Limit  (cost=21038.40..21048.40 rows=4000 width=125) (actual time=121.309..125.335 rows=1751 loops=1)
+  Buffers: shared hit=9111, temp read=1263 written=1266
+  ->  Sort  (cost=21038.40..21048.40 rows=4000 width=125) (actual time=121.308..125.254 rows=1751 loops=1)
+        Sort Key: (sum(ol.quantity)) DESC, (sum(ol.line_total_cents)) DESC
+        Sort Method: quicksort  Memory: 299kB
+        Buffers: shared hit=9111, temp read=1263 written=1266
+        ->  GroupAggregate  (cost=12783.21..20799.08 rows=4000 width=125) (actual time=99.358..124.466 rows=1751 loops=1)
+              Group Key: p.id
+              Buffers: shared hit=9111, temp read=1263 written=1266
+              ->  Gather Merge  (cost=12783.21..19976.99 rows=61767 width=113) (actual time=99.332..114.052 rows=81065 loops=1)
+                    Workers Planned: 2
+                    Workers Launched: 2
+                    Buffers: shared hit=9111, temp read=1263 written=1266
+                    ->  Sort  (cost=11783.19..11847.53 rows=25736 width=113) (actual time=87.212..89.870 rows=27022 loops=3)
+                          Sort Key: p.id, o.id
+                          Sort Method: external merge  Disk: 3672kB
+                          Buffers: shared hit=9111, temp read=1263 written=1266
+                          Worker 0:  Sort Method: external merge  Disk: 3256kB
+                          Worker 1:  Sort Method: external merge  Disk: 3176kB
+                          ->  Hash Join  (cost=3566.47..9897.83 rows=25736 width=113) (actual time=8.419..67.128 rows=27022 loops=3)
+                                Hash Cond: (pv.product_id = p.id)
+                                Buffers: shared hit=9039
+                                ->  Hash Join  (cost=2964.47..9228.21 rows=25736 width=60) (actual time=6.058..60.726 rows=27022 loops=3)
+                                      Hash Cond: ((ol.variant_id)::uuid = pv.id)
+                                      Buffers: shared hit=7409
+                                      ->  Parallel Hash Join  (cost=2430.14..8619.87 rows=25736 width=65) (actual time=4.080..20.315 rows=27022 loops=3)
+                                            Hash Cond: (ol.order_id = o.id)
+                                            Buffers: shared hit=6608
+                                            ->  Parallel Seq Scan on order_lines ol  (cost=0.00..5963.97 rows=85997 width=65) (actual time=0.004..4.055 rows=68798 loops=3)
+                                                  Buffers: shared hit=5104
+                                            ->  Parallel Hash  (cost=2298.12..2298.12 rows=10562 width=16) (actual time=4.008..4.009 rows=7870 loops=3)
+                                                  Buckets: 32768  Batches: 1  Memory Usage: 1376kB
+                                                  Buffers: shared hit=1504
+                                                  ->  Parallel Seq Scan on orders o  (cost=0.00..2298.12 rows=10562 width=16) (actual time=0.012..9.762 rows=23610 loops=1)
+                                                        Filter: ((created_at >= '2000-01-01 00:00:00'::timestamp without time zone) AND (created_at < '2100-01-01 00:00:00'::timestamp without time zone) AND (tenant_id = 'fd0f152e-193a-4274-8f5a-4393c1de9bb4'::uuid) AND (status = ANY ('{paid,processing,shipped,delivered}'::text[])))
+                                                        Rows Removed by Filter: 36390
+                                                        Buffers: shared hit=1504
+                                      ->  Hash  (cost=385.81..385.81 rows=11881 width=32) (actual time=1.946..1.947 rows=11881 loops=3)
+                                            Buckets: 16384  Batches: 1  Memory Usage: 871kB
+                                            Buffers: shared hit=801
+                                            ->  Seq Scan on product_variants pv  (cost=0.00..385.81 rows=11881 width=32) (actual time=0.051..1.038 rows=11881 loops=3)
+                                                  Buffers: shared hit=801
+                                ->  Hash  (cost=552.00..552.00 rows=4000 width=69) (actual time=2.313..2.314 rows=4000 loops=3)
+                                      Buckets: 4096  Batches: 1  Memory Usage: 430kB
+                                      Buffers: shared hit=1536
+                                      ->  Seq Scan on products p  (cost=0.00..552.00 rows=4000 width=69) (actual time=0.043..1.823 rows=4000 loops=3)
+                                            Buffers: shared hit=1536
+Planning:
+  Buffers: shared hit=23
+Planning Time: 0.267 ms
+Execution Time: 126.219 ms
+```
+
+## Statistieken (geschatte rijen per tabel, pg_stats voor de gebruikte kolommen)
+```
+order_lines: ~206393 rijen, 5104 pagina's
+  order_lines.created_at: null_frac=0.000 n_distinct=-0.2432689 correlation=-0.003 mcv={"2025-05-20 23:55:20+00"} freqs={0.0002}
+  order_lines.id: null_frac=0.000 n_distinct=-1.0 correlation=0.005
+  order_lines.line_total_cents: null_frac=0.000 n_distinct=17130.0 correlation=-0.045 mcv={71304,46429,92858,142608,9171,6448,9409,37798,8953,375,37771,277,345,139287,213912,17906,18342,75542,12896,419,285216,1… freqs={0.019766666,0.0196,0.011566667,0.010933333,0.009333333,0.008666666,0.008666666,0.008433334,0.0084,0.0075666667,0.007466…
+  order_lines.name: null_frac=0.000 n_distinct=9522.0 correlation=0.261 mcv={"Modular Titanium Cable Tray 50m (HD)","Modular Titanium Cable Tray 50m (KIT)","Slotted Cast Iron Air Filter 32mm (GALV… freqs={0.055666666,0.0548,0.026166666,0.025033332,0.025,0.0246,0.023866666,0.0225,0.0216,0.0204,0.020033333,0.013133333,0.0130…
+  order_lines.order_id: null_frac=0.000 n_distinct=-0.24357416 correlation=0.0 mcv={ebe24d5a-1229-434c-ba3c-a7c486c98884} freqs={0.0002}
+  order_lines.product_id: null_frac=0.000 n_distinct=3975.0 correlation=-0.093 mcv={55e6a9ca-b52c-4f25-9051-1214e3016e2e,1b035732-a86d-44ea-9b46-7cbfc9450980,977cb674-4353-4e9c-abe4-25a9c3eee501,47e06081… freqs={0.11046667,0.1008,0.077366665,0.062033333,0.046366666,0.0005,0.0005,0.00043333333,0.00043333333,0.00043333333,0.0004333…
+  order_lines.quantity: null_frac=0.000 n_distinct=12.0 correlation=0.2 mcv={1,2,3,4,5,6,8,10,12,20,25,50} freqs={0.3479,0.20373334,0.11873333,0.080066666,0.06786667,0.048733335,0.0414,0.039633334,0.0189,0.017766668,0.010733333,0.004…
+  order_lines.sku: null_frac=0.000 n_distinct=9536.0 correlation=-0.059 mcv={EAT-0100145-HD,EAT-0100145-KIT,BOS-0103225-GALV,BOS-0103225-BULK,BOS-0103225-50PK,BOS-0103225-SS,HOF-0102628-HD,HOF-010… freqs={0.055666666,0.0548,0.026166666,0.025033332,0.025,0.0246,0.023866666,0.0225,0.0216,0.0204,0.020033333,0.013133333,0.0130…
+  order_lines.variant_id: null_frac=0.000 n_distinct=9536.0 correlation=0.1 mcv={07bc2bf1-a351-4923-93d8-9456e0660071,7da1d8b9-4f0f-44dd-a736-6460787a15b5,669fcf71-1035-41b2-9329-1b5ece02611a,68e8e4f2… freqs={0.055666666,0.0548,0.026166666,0.025033332,0.025,0.0246,0.023866666,0.0225,0.0216,0.0204,0.020033333,0.013133333,0.0130…
+orders: ~60000 rijen, 1504 pagina's
+  orders.created_at: null_frac=0.000 n_distinct=-0.9994 correlation=0.006
+  orders.currency: null_frac=0.000 n_distinct=1.0 correlation=1.0 mcv={EUR} freqs={1}
+  orders.id: null_frac=0.000 n_distinct=-1.0 correlation=-0.009
+  orders.status: null_frac=0.000 n_distinct=8.0 correlation=0.299 mcv={delivered} freqs={0.44843334}
+  orders.tenant_id: null_frac=0.000 n_distinct=3.0 correlation=-0.476 mcv={fd0f152e-193a-4274-8f5a-4393c1de9bb4,72a298e2-36f5-4754-b57f-9f97747fd90b,eda10556-85a0-4d84-9170-5f623dba6c52} freqs={0.437,0.31076667,0.25223333}
+product_variants: ~11881 rijen, 267 pagina's
+  product_variants.created_at: null_frac=0.000 n_distinct=-0.336672 correlation=0.004 mcv={"2023-10-24 16:27:23.600763+00","2023-10-28 08:50:36.510816+00","2023-10-31 10:28:08.663183+00","2023-11-04 19:16:47.24… freqs={0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008…
+  product_variants.id: null_frac=0.000 n_distinct=-1.0 correlation=0.023
+  product_variants.name: null_frac=0.000 n_distinct=-0.9984008 correlation=-0.019 mcv={"Copper O-Ring 3/4in (10PK)","Aluminium Socket Set S (GALV)","Carbon Steel Shelving Bay M5 (SS)","Cast Iron Rivet M (BU… freqs={0.000252504,0.000168336,0.000168336,0.000168336,0.000168336,0.000168336,0.000168336,0.000168336,0.000168336,0.000168336…
+  product_variants.product_id: null_frac=0.000 n_distinct=-0.336672 correlation=-0.034 mcv={011d0df1-8ba0-41d1-b8b0-90398acce597,01253bcc-2798-4b06-aa34-d80b643a478b,02271b89-a01f-4b86-aff1-bf6f41de7028,03c18387… freqs={0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008,0.000505008…
+  product_variants.sku: null_frac=0.000 n_distinct=-1.0 correlation=0.047
+products: ~4000 rijen, 512 pagina's
+  products.brand: null_frac=0.000 n_distinct=46.0 correlation=0.036 mcv={Hoffmann,Lista,Eaton,Makita,Knipex,Parker,Siemens,Uvex,Tyrolit,Norton,Bahco,Dexion,ESAB,Fami,Manutan,Festo,Metabo,"Bosc… freqs={0.02625,0.026,0.0255,0.025,0.0245,0.0245,0.0245,0.0245,0.02425,0.024,0.0235,0.02325,0.02325,0.02325,0.023,0.0225,0.0225…
+  products.created_at: null_frac=0.000 n_distinct=-1.0 correlation=0.042
+  products.currency: null_frac=0.000 n_distinct=1.0 correlation=1.0 mcv={EUR} freqs={1}
+  products.id: null_frac=0.000 n_distinct=-1.0 correlation=-0.044
+  products.name: null_frac=0.000 n_distinct=-0.99575 correlation=-0.016 mcv={"Copper O-Ring 3/4in","Aluminium Socket Set S","Carbon Steel Shelving Bay M5","Cast Iron Rivet M","Fibreglass Bushing 2… freqs={0.00075,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005,0.0005}
+  products.sku: null_frac=0.000 n_distinct=-1.0 correlation=0.037
+  products.status: null_frac=0.000 n_distinct=4.0 correlation=0.878 mcv={active,draft,archived,discontinued} freqs={0.9335,0.0245,0.021,0.021}
+  products.tenant_id: null_frac=0.000 n_distinct=3.0 correlation=-0.469 mcv={fd0f152e-193a-4274-8f5a-4393c1de9bb4,72a298e2-36f5-4754-b57f-9f97747fd90b,eda10556-85a0-4d84-9170-5f623dba6c52} freqs={0.43775,0.3095,0.25275}
+```
+
+Herschrijf de query zodat die sneller is en exact hetzelfde resultaat geeft.

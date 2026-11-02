@@ -1,0 +1,169 @@
+## Originele query
+```sql
+-- name: top_customers
+-- owner: sales
+-- params: tenant_id, from, to, limit
+-- Customers ranked by revenue, with their most recent order. Only customers
+-- whose last order falls inside the window are listed; this is what the
+-- account managers asked for ("who was active this quarter").
+WITH customer_orders AS MATERIALIZED (
+    SELECT o.customer_id,
+           o.id,
+           o.total_cents,
+           o.created_at
+      FROM orders o
+     WHERE o.status IN ('paid', 'processing', 'shipped', 'delivered')
+),
+totals AS (
+    SELECT customer_id,
+           sum(total_cents) AS revenue,
+           count(*)         AS order_count
+      FROM customer_orders
+     GROUP BY customer_id
+),
+last_order AS (
+    SELECT DISTINCT ON (customer_id)
+           customer_id,
+           created_at AS last_order_at
+      FROM customer_orders
+     ORDER BY customer_id, created_at DESC
+)
+SELECT c.id,
+       c.email,
+       c.company,
+       c.country_code,
+       t.revenue,
+       t.order_count,
+       lo.last_order_at
+  FROM customers c
+  JOIN totals     t  ON t.customer_id  = c.id
+  JOIN last_order lo ON lo.customer_id = c.id
+ WHERE c.tenant_id = %(tenant_id)s
+   AND lo.last_order_at >= %(from)s
+   AND lo.last_order_at <  %(to)s
+ ORDER BY t.revenue DESC
+ LIMIT %(limit)s
+```
+
+## Schema van de gebruikte tabellen (kolommen, constraints, indexen)
+```
+TABLE customers (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  external_ref text,
+  email text NOT NULL,
+  first_name text,
+  last_name text,
+  company text,
+  phone text,
+  country_code text,
+  vat_number text,
+  segment text NOT NULL,
+  is_deleted boolean NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  order_count integer NOT NULL,
+  lifetime_value_cents bigint NOT NULL,
+  last_order_at timestamp with time zone,
+  metadata jsonb NOT NULL
+)
+  CONSTRAINT CHECK (((country_code IS NULL) OR (country_code ~ '^[A-Z]{2}$'::text)))
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)
+TABLE orders (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  status text NOT NULL,
+  currency text NOT NULL,
+  subtotal_cents bigint NOT NULL,
+  discount_cents bigint NOT NULL,
+  shipping_cents bigint NOT NULL,
+  total_cents bigint NOT NULL,
+  shipping_address_id uuid,
+  billing_address_id uuid,
+  notes text,
+  channel text NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  promotion_id uuid,
+  reference text
+)
+  CONSTRAINT FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX orders_created_at_tenant_idx ON public.orders USING btree (created_at, tenant_id)
+  CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)
+  CREATE INDEX orders_total_eur_idx ON public.orders USING btree (tenant_id, ((total_cents / 100)) DESC)
+```
+
+## Uitvoeringsplan van het origineel (EXPLAIN ANALYZE, BUFFERS) op representatieve parameters
+```
+Limit  (cost=7725.22..7725.22 rows=1 width=121) (actual time=6301.596..6301.889 rows=4288 loops=1)
+  Buffers: shared hit=30901, temp read=383 written=383
+  CTE customer_orders
+    ->  Seq Scan on orders o  (cost=0.00..2404.00 rows=41089 width=48) (actual time=0.008..10.502 rows=54033 loops=1)
+          Filter: (status = ANY ('{paid,processing,shipped,delivered}'::text[]))
+          Rows Removed by Filter: 5967
+          Buffers: shared hit=1504
+  ->  Sort  (cost=5321.22..5321.22 rows=1 width=121) (actual time=6301.595..6301.691 rows=4288 loops=1)
+        Sort Key: (sum(customer_orders_1.total_cents)) DESC
+        Sort Method: quicksort  Memory: 762kB
+        Buffers: shared hit=30901, temp read=383 written=383
+        ->  Nested Loop  (cost=5100.76..5321.21 rows=1 width=121) (actual time=46.970..6298.639 rows=4288 loops=1)
+              Buffers: shared hit=30901, temp read=383 written=383
+              ->  Nested Loop  (cost=5100.47..5315.92 rows=1 width=80) (actual time=46.951..6279.310 rows=9799 loops=1)
+                    Join Filter: (customer_orders_1.customer_id = lo.customer_id)
+                    Rows Removed by Join Filter: 48005301
+                    Buffers: shared hit=1504, temp read=383 written=383
+                    ->  Subquery Scan on lo  (cost=3970.53..4178.97 rows=1 width=24) (actual time=34.608..45.941 rows=9799 loops=1)
+                          Filter: ((lo.last_order_at >= '2000-01-01 00:00:00'::timestamp without time zone) AND (lo.last_order_at < '2100-01-01 00:00:00'::timestamp without time zone))
+                          Buffers: shared hit=1504, temp written=382
+                          ->  Unique  (cost=3970.53..4175.97 rows=200 width=24) (actual time=34.602..44.917 rows=9799 loops=1)
+                                Buffers: shared hit=1504, temp written=382
+                                ->  Sort  (cost=3970.53..4073.25 rows=41089 width=24) (actual time=34.601..42.282 rows=54033 loops=1)
+                                      Sort Key: customer_orders.customer_id, customer_orders.created_at DESC
+                                      Sort Method: quicksort  Memory: 3899kB
+                                      Buffers: shared hit=1504, temp written=382
+                                      ->  CTE Scan on customer_orders  (cost=0.00..821.78 rows=41089 width=24) (actual time=0.010..22.379 rows=54033 loops=1)
+                                            Buffers: shared hit=1504, temp written=382
+                    ->  HashAggregate  (cost=1129.95..1132.45 rows=200 width=56) (actual time=0.001..0.484 rows=4900 loops=9799)
+                          Group Key: customer_orders_1.customer_id
+                          Batches: 1  Memory Usage: 1953kB
+                          Buffers: temp read=383 written=1
+                          ->  CTE Scan on customer_orders customer_orders_1  (cost=0.00..821.78 rows=41089 width=24) (actual time=0.038..3.961 rows=54033 loops=1)
+                                Buffers: temp read=383 written=1
+              ->  Index Scan using customers_pkey on customers c  (cost=0.29..5.29 rows=1 width=73) (actual time=0.002..0.002 rows=0 loops=9799)
+                    Index Cond: (id = customer_orders_1.customer_id)
+                    Filter: (tenant_id = 'fd0f152e-193a-4274-8f5a-4393c1de9bb4'::uuid)
+                    Rows Removed by Filter: 1
+                    Buffers: shared hit=29397
+Planning Time: 0.139 ms
+Execution Time: 6303.329 ms
+```
+
+## Statistieken (geschatte rijen per tabel, pg_stats voor de gebruikte kolommen)
+```
+customers: ~10000 rijen, 631 pagina's
+  customers.company: null_frac=0.000 n_distinct=-0.4572 correlation=0.004 mcv={"Nordic Mechanical Sp. z o.o.","Summit Manufacturing ApS","Westland Facilities AB","Atlas Services BV","Beacon Installa… freqs={0.0008,0.0008,0.0008,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0006,0.0006,…
+  customers.country_code: null_frac=0.000 n_distinct=12.0 correlation=0.19 mcv={NL,DE,BE,GB,FR,SE,DK,PL,AT,ES,IT,IE} freqs={0.2984,0.2558,0.0983,0.081,0.0789,0.0422,0.0398,0.0372,0.0271,0.0201,0.0113,0.0099}
+  customers.created_at: null_frac=0.000 n_distinct=-1.0 correlation=0.004
+  customers.email: null_frac=0.000 n_distinct=-1.0 correlation=0.011
+  customers.id: null_frac=0.000 n_distinct=-1.0 correlation=0.006
+  customers.last_order_at: null_frac=0.020 n_distinct=-0.9796 correlation=0.003 mcv={"2026-09-01 13:18:25+00","2026-10-04 15:44:02+00","2026-10-19 22:47:55+00"} freqs={0.0002,0.0002,0.0002}
+  customers.order_count: null_frac=0.000 n_distinct=88.0 correlation=0.186 mcv={3,4,2,5,6,1,7,8,0,9,10,11,12,111,128,78,91,94,96,82,84,88,93,105,117,120,161,265} freqs={0.1985,0.1941,0.1658,0.1471,0.0899,0.081,0.0515,0.0262,0.0201,0.0101,0.004,0.0014,0.0005,0.0004,0.0004,0.0003,0.0003,0.…
+  customers.tenant_id: null_frac=0.000 n_distinct=3.0 correlation=-0.44 mcv={fd0f152e-193a-4274-8f5a-4393c1de9bb4,72a298e2-36f5-4754-b57f-9f97747fd90b,eda10556-85a0-4d84-9170-5f623dba6c52} freqs={0.4378,0.3095,0.2527}
+orders: ~60000 rijen, 1504 pagina's
+  orders.created_at: null_frac=0.000 n_distinct=-0.9994 correlation=0.006
+  orders.customer_id: null_frac=0.000 n_distinct=-0.1535 correlation=0.032 mcv={3030a5c4-4d8d-4ea7-9ddb-f670a90722e7,829ce4fd-b639-4b38-adc0-d0177221870f,6c817fa6-58fd-4975-b663-e69efebeb21f,ed48406c… freqs={0.0134333335,0.012,0.0107,0.008866667,0.0074,0.0072,0.0069,0.0065,0.0060333335,0.0058,0.005266667,0.0051,0.0050666668,0…
+  orders.id: null_frac=0.000 n_distinct=-1.0 correlation=-0.009
+  orders.status: null_frac=0.000 n_distinct=8.0 correlation=0.299 mcv={delivered} freqs={0.44843334}
+  orders.tenant_id: null_frac=0.000 n_distinct=3.0 correlation=-0.476 mcv={fd0f152e-193a-4274-8f5a-4393c1de9bb4,72a298e2-36f5-4754-b57f-9f97747fd90b,eda10556-85a0-4d84-9170-5f623dba6c52} freqs={0.437,0.31076667,0.25223333}
+  orders.total_cents: null_frac=0.000 n_distinct=-0.82488334 correlation=-0.148 mcv={71304,46429,142608,139287,92858,37798,213912,37771,75542,232145,117733,285216,75596,185716,427824,53718,356520,10104,27… freqs={0.0028,0.0023333333,0.0015333333,0.0013666666,0.0013333333,0.001,0.00086666667,0.0007,0.0007,0.00066666666,0.0006333333…
+```
+
+Herschrijf de query zodat die sneller is en exact hetzelfde resultaat geeft.

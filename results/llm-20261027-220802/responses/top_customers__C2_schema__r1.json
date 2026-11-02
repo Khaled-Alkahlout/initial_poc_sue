@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s\n```\n\nDeze versie filtert eerst op de klanten van de tenant, in plaats van alle orders van alle tenants te aggregeren. De gematerialiseerde CTE en de dubbele scan (totals plus DISTINCT ON met sortering) zijn vervangen door één aggregatie, waarbij `max(created_at)` gelijk is aan de laatste order uit `DISTINCT ON`. De kolomnamen, de volgorde en de filtering op het laatste-orderdatumvenster blijven ongewijzigd. Bij gelijke omzet was de volgorde in het origineel ook al niet gedefinieerd.",
+  "input_tokens": 1982,
+  "output_tokens": 1219,
+  "seconds": 9.4,
+  "sql": "SELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s",
+  "model": "claude-sonnet-5-5"
+}

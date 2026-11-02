@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY revenue DESC\n LIMIT %(limit)s\n```\n\nDe query gebruikt nu één join en één aggregatie per klant. De laatste bestelling is `max(created_at)`, dus de `DISTINCT ON`-CTE en de gematerialiseerde CTE vervallen. Daarmee verdwijnt ook de geneste lus die 9799 keer een HashAggregate herhaalde (48 miljoen weggefilterde rijen). Het filter op tenant gebeurt vóór de aggregatie, en `c.id` is de primary key, dus de overige klantkolommen mogen zonder aggregatie in de SELECT staan.",
+  "input_tokens": 5078,
+  "output_tokens": 1167,
+  "seconds": 9.1,
+  "sql": "SELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY revenue DESC\n LIMIT %(limit)s",
+  "model": "claude-sonnet-5-5"
+}

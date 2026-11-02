@@ -1,0 +1,170 @@
+## Originele query
+```sql
+-- name: top_products
+-- owner: merchandising
+-- params: tenant_id, from, to, limit
+-- Best sellers by units and revenue. Line items reference the variant by its
+-- string id (integration feed), so it is cast when joining the catalog.
+SELECT p.id,
+       p.sku,
+       p.name,
+       p.brand,
+       p.currency,
+       count(DISTINCT o.id)        AS order_count,
+       sum(ol.quantity)            AS quantity,
+       sum(ol.line_total_cents)    AS revenue_cents,
+       count(DISTINCT pv.id)       AS variant_count
+  FROM order_lines ol
+  JOIN orders o           ON o.id = ol.order_id
+  JOIN product_variants pv ON pv.id = ol.variant_id::uuid
+  JOIN products p         ON p.id = pv.product_id
+ WHERE o.tenant_id = %(tenant_id)s
+   AND o.created_at >= %(from)s
+   AND o.created_at <  %(to)s
+   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')
+ GROUP BY p.id, p.sku, p.name, p.brand, p.currency
+ ORDER BY quantity DESC, revenue_cents DESC
+ LIMIT %(limit)s
+```
+
+## Schema van de gebruikte tabellen (kolommen, constraints, indexen)
+```
+TABLE order_lines (
+  id uuid NOT NULL,
+  order_id uuid NOT NULL,
+  product_id uuid,
+  variant_id text,
+  sku text NOT NULL,
+  name text NOT NULL,
+  quantity integer NOT NULL,
+  unit_price_cents bigint NOT NULL,
+  line_total_cents bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (product_id) REFERENCES products(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX order_lines_pkey ON public.order_lines USING btree (id)
+TABLE orders (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  status text NOT NULL,
+  currency text NOT NULL,
+  subtotal_cents bigint NOT NULL,
+  discount_cents bigint NOT NULL,
+  shipping_cents bigint NOT NULL,
+  total_cents bigint NOT NULL,
+  shipping_address_id uuid,
+  billing_address_id uuid,
+  notes text,
+  channel text NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  promotion_id uuid,
+  reference text
+)
+  CONSTRAINT FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX orders_created_at_tenant_idx ON public.orders USING btree (created_at, tenant_id)
+  CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)
+  CREATE INDEX orders_total_eur_idx ON public.orders USING btree (tenant_id, ((total_cents / 100)) DESC)
+TABLE product_variants (
+  id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  sku text NOT NULL,
+  name text NOT NULL,
+  price_cents bigint NOT NULL,
+  weight_grams integer,
+  is_active boolean NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  attributes jsonb NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX product_variants_pkey ON public.product_variants USING btree (id)
+TABLE products (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  category_id uuid,
+  sku text NOT NULL,
+  name text NOT NULL,
+  slug text NOT NULL,
+  description text,
+  thumbnail bytea,
+  brand text,
+  price_cents bigint NOT NULL,
+  currency text NOT NULL,
+  status text NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  view_count bigint NOT NULL,
+  last_viewed_at timestamp with time zone,
+  attributes jsonb NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (category_id) REFERENCES categories(id)
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX products_pkey ON public.products USING btree (id)
+```
+
+## Uitvoeringsplan van het origineel (EXPLAIN ANALYZE, BUFFERS) op representatieve parameters
+```
+Limit  (cost=21038.40..21048.40 rows=4000 width=125) (actual time=121.755..125.544 rows=1751 loops=1)
+  Buffers: shared hit=9111, temp read=1264 written=1266
+  ->  Sort  (cost=21038.40..21048.40 rows=4000 width=125) (actual time=121.754..125.470 rows=1751 loops=1)
+        Sort Key: (sum(ol.quantity)) DESC, (sum(ol.line_total_cents)) DESC
+        Sort Method: quicksort  Memory: 299kB
+        Buffers: shared hit=9111, temp read=1264 written=1266
+        ->  GroupAggregate  (cost=12783.21..20799.08 rows=4000 width=125) (actual time=99.667..124.697 rows=1751 loops=1)
+              Group Key: p.id
+              Buffers: shared hit=9111, temp read=1264 written=1266
+              ->  Gather Merge  (cost=12783.21..19976.99 rows=61767 width=113) (actual time=99.640..114.425 rows=81065 loops=1)
+                    Workers Planned: 2
+                    Workers Launched: 2
+                    Buffers: shared hit=9111, temp read=1264 written=1266
+                    ->  Sort  (cost=11783.19..11847.53 rows=25736 width=113) (actual time=87.745..90.442 rows=27022 loops=3)
+                          Sort Key: p.id, o.id
+                          Sort Method: external merge  Disk: 3680kB
+                          Buffers: shared hit=9111, temp read=1264 written=1266
+                          Worker 0:  Sort Method: external merge  Disk: 3264kB
+                          Worker 1:  Sort Method: external merge  Disk: 3168kB
+                          ->  Hash Join  (cost=3566.47..9897.83 rows=25736 width=113) (actual time=8.845..67.635 rows=27022 loops=3)
+                                Hash Cond: (pv.product_id = p.id)
+                                Buffers: shared hit=9039
+                                ->  Hash Join  (cost=2964.47..9228.21 rows=25736 width=60) (actual time=6.273..60.984 rows=27022 loops=3)
+                                      Hash Cond: ((ol.variant_id)::uuid = pv.id)
+                                      Buffers: shared hit=7409
+                                      ->  Parallel Hash Join  (cost=2430.14..8619.87 rows=25736 width=65) (actual time=4.087..19.865 rows=27022 loops=3)
+                                            Hash Cond: (ol.order_id = o.id)
+                                            Buffers: shared hit=6608
+                                            ->  Parallel Seq Scan on order_lines ol  (cost=0.00..5963.97 rows=85997 width=65) (actual time=0.005..4.004 rows=68798 loops=3)
+                                                  Buffers: shared hit=5104
+                                            ->  Parallel Hash  (cost=2298.12..2298.12 rows=10562 width=16) (actual time=4.023..4.023 rows=7870 loops=3)
+                                                  Buckets: 32768  Batches: 1  Memory Usage: 1376kB
+                                                  Buffers: shared hit=1504
+                                                  ->  Parallel Seq Scan on orders o  (cost=0.00..2298.12 rows=10562 width=16) (actual time=0.019..9.748 rows=23610 loops=1)
+                                                        Filter: ((created_at >= '2000-01-01 00:00:00'::timestamp without time zone) AND (created_at < '2100-01-01 00:00:00'::timestamp without time zone) AND (tenant_id = 'fd0f152e-193a-4274-8f5a-4393c1de9bb4'::uuid) AND (status = ANY ('{paid,processing,shipped,delivered}'::text[])))
+                                                        Rows Removed by Filter: 36390
+                                                        Buffers: shared hit=1504
+                                      ->  Hash  (cost=385.81..385.81 rows=11881 width=32) (actual time=2.153..2.154 rows=11881 loops=3)
+                                            Buckets: 16384  Batches: 1  Memory Usage: 871kB
+                                            Buffers: shared hit=801
+                                            ->  Seq Scan on product_variants pv  (cost=0.00..385.81 rows=11881 width=32) (actual time=0.066..1.165 rows=11881 loops=3)
+                                                  Buffers: shared hit=801
+                                ->  Hash  (cost=552.00..552.00 rows=4000 width=69) (actual time=2.395..2.395 rows=4000 loops=3)
+                                      Buckets: 4096  Batches: 1  Memory Usage: 430kB
+                                      Buffers: shared hit=1536
+                                      ->  Seq Scan on products p  (cost=0.00..552.00 rows=4000 width=69) (actual time=0.083..1.888 rows=4000 loops=3)
+                                            Buffers: shared hit=1536
+Planning:
+  Buffers: shared hit=23
+Planning Time: 0.246 ms
+Execution Time: 126.146 ms
+```
+
+Herschrijf de query zodat die sneller is en exact hetzelfde resultaat geeft.

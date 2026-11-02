@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY revenue DESC\n LIMIT %(limit)s\n```\n\nDe orders worden nu één keer gelezen en direct per klant geaggregeerd, na een filter op de tenant van de klant. Zo verdwijnt de geneste lus met 48 miljoen weggefilterde rijen, evenals de gematerialiseerde CTE en de DISTINCT ON-sortering. `max(created_at)` is gelijk aan de eerste rij van `created_at DESC`, dus de laatste bestelling en het venstercriterium blijven identiek. Kolomnamen, kolomvolgorde en sortering zijn ongewijzigd.",
+  "input_tokens": 3478,
+  "output_tokens": 974,
+  "seconds": 8.0,
+  "sql": "SELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents) AS revenue,\n       count(*)           AS order_count,\n       max(o.created_at)  AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY revenue DESC\n LIMIT %(limit)s",
+  "model": "claude-sonnet-5-5"
+}

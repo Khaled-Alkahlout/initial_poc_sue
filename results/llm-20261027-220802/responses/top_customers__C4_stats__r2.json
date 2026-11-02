@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents)  AS revenue,\n       count(*)            AS order_count,\n       max(o.created_at)   AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s\n```\n\nDe drie CTE's (totals, last_order en de gematerialiseerde customer_orders) zijn vervangen door één join en aggregatie per klant. Daardoor verdwijnt de geneste lus met 48 miljoen verworpen rijen. `max(created_at)` geeft hetzelfde resultaat als `DISTINCT ON … created_at DESC`, en het tenantfilter op `customers` beperkt de orders die verwerkt worden. Kolomnamen, kolomvolgorde en filtersemantiek (alleen de vier statussen, geen tenantfilter op orders) blijven gelijk.",
+  "input_tokens": 5078,
+  "output_tokens": 1122,
+  "seconds": 8.7,
+  "sql": "SELECT c.id,\n       c.email,\n       c.company,\n       c.country_code,\n       sum(o.total_cents)  AS revenue,\n       count(*)            AS order_count,\n       max(o.created_at)   AS last_order_at\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n WHERE c.tenant_id = %(tenant_id)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n GROUP BY c.id\nHAVING max(o.created_at) >= %(from)s\n   AND max(o.created_at) <  %(to)s\n ORDER BY sum(o.total_cents) DESC\n LIMIT %(limit)s",
+  "model": "claude-sonnet-5-5"
+}

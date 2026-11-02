@@ -1,0 +1,58 @@
+ANALYSE LLM-RUNS: 48 antwoorden, model claude-sonnet-5-5
+Mappen: llm-20261027-214728, llm-20261027-214957, llm-20261027-220148, llm-20261027-220802
+Drempel ACCEPTED: speedup >= 1.2; 'trager' = speedup < 0.83
+Ruis A/A-controle (48 metingen met het origineel): speedup 0.96 tot 1.05
+
+1. PER CONDITIE (samengevoegd over de casussen; tussen haakjes het 95%-interval, exact)
+conditie    n  ACCEPTED  gelijk, geen winst  ongewijzigd  gelijk, trager  fout  fout [95%-int.]  ACCEPTED [95%-int.]
+---------  --  --------  ------------------  -----------  --------------  ----  ---------------  -------------------
+C1_query   12         3                   0            6               2     1        8% [0-38]           25% [5-57]
+C2_schema  12         3                   0            5               3     1        8% [0-38]           25% [5-57]
+C3_plan    12         3                   0            5               3     1        8% [0-38]           25% [5-57]
+C4_stats   12         3                   0            6               3     0        0% [0-26]           25% [5-57]
+
+2. KOSTEN EN LENGTE PER CONDITIE (prijs 2 en 10 dollar per miljoen tokens)
+conditie   gem. invoertokens  gem. uitvoertokens  kosten (dollar)
+---------  -----------------  ------------------  ---------------
+C1_query                 776                1036            0.143
+C2_schema               1740                1075            0.171
+C3_plan                 2827                1042            0.193
+C4_stats                4462                1093            0.238
+Totaal: 0.745 dollar
+
+3. PER CASUS EN CONDITIE (aantallen per categorie; mediaan speedup van de gelijkwaardige antwoorden)
+A=ACCEPTED  G=gelijk, geen winst  O=ongewijzigd  T=gelijk, trager  F=fout
+casus            conditie  n  uitkomsten  mediaan speedup
+--------------  ---------  -  ----------  ---------------
+top_products     C1_query  3       T2 F1             0.69
+top_products    C2_schema  3          T3             0.69
+top_products      C3_plan  3          T3             0.62
+top_products     C4_stats  3          T3             0.59
+top_customers    C1_query  3          A3           199.86
+top_customers   C2_schema  3          A3           207.42
+top_customers     C3_plan  3          A3           206.16
+top_customers    C4_stats  3          A3            198.1
+audit_log_page   C1_query  3          O3             0.97
+audit_log_page  C2_schema  3          O3             1.02
+audit_log_page    C3_plan  3          O3             1.01
+audit_log_page   C4_stats  3          O3             1.02
+revenue_orders   C1_query  3          O3              1.0
+revenue_orders  C2_schema  3       O2 F1             0.98
+revenue_orders    C3_plan  3       O2 F1             0.96
+revenue_orders   C4_stats  3          O3              1.0
+
+4. FOUTEN (3 van 48)
+casus            conditie  rep  param.sets fout                                                 wat ging er mis
+--------------  ---------  ---  ---------------  --------------------------------------------------------------
+revenue_orders  C2_schema    3              6/8  waarde in de query die in het origineel niet staat: 'delivery'
+revenue_orders    C3_plan    1              6/8  waarde in de query die in het origineel niet staat: 'delivery'
+top_products     C1_query    1              6/8  waarde in de query die in het origineel niet staat: 'delivery'
+
+5. EXTRA CONTROLES
+UUID uit de prompt hard-coded in de herschrijving: 0 van 48
+  C1_query: 0/12
+  C2_schema: 0/12
+  C3_plan: 0/12
+  C4_stats: 0/12
+Gelijkwaardig maar trager dan het origineel (zonder framework had je dit toegepast):
+  11 van 48, speedup 0.52 tot 0.70

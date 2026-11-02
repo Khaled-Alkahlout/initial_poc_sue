@@ -1,0 +1,81 @@
+## Originele query
+```sql
+-- name: revenue_orders
+-- owner: finance
+-- params: tenant_id, from, to
+-- Revenue-bearing orders in a window. Period grouping (day/week/month, week
+-- start, fiscal month boundaries) is applied by the service layer so the same
+-- query feeds every grouping the dashboard offers.
+SELECT o.id,
+       o.created_at,
+       o.status,
+       o.total_cents,
+       o.currency
+  FROM orders o
+ WHERE o.tenant_id = %(tenant_id)s
+   AND o.created_at >= %(from)s
+   AND o.created_at <  %(to)s
+   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')
+```
+
+## Schema van de gebruikte tabellen (kolommen, constraints, indexen)
+```
+TABLE orders (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  status text NOT NULL,
+  currency text NOT NULL,
+  subtotal_cents bigint NOT NULL,
+  discount_cents bigint NOT NULL,
+  shipping_cents bigint NOT NULL,
+  total_cents bigint NOT NULL,
+  shipping_address_id uuid,
+  billing_address_id uuid,
+  notes text,
+  channel text NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  promotion_id uuid,
+  reference text
+)
+  CONSTRAINT FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX orders_created_at_tenant_idx ON public.orders USING btree (created_at, tenant_id)
+  CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)
+  CREATE INDEX orders_total_eur_idx ON public.orders USING btree (tenant_id, ((total_cents / 100)) DESC)
+```
+
+## Uitvoeringsplan van het origineel (EXPLAIN ANALYZE, BUFFERS) op representatieve parameters
+```
+Bitmap Heap Scan on orders o  (cost=581.43..2675.38 rows=17956 width=44) (actual time=1.180..6.727 rows=23610 loops=1)
+  Recheck Cond: (tenant_id = 'fd0f152e-193a-4274-8f5a-4393c1de9bb4'::uuid)
+  Filter: ((created_at >= '2000-01-01 00:00:00'::timestamp without time zone) AND (created_at < '2100-01-01 00:00:00'::timestamp without time zone) AND (status = ANY ('{paid,processing,shipped,delivered}'::text[])))
+  Rows Removed by Filter: 2654
+  Heap Blocks: exact=655
+  Buffers: shared hit=752
+  ->  Bitmap Index Scan on orders_total_eur_idx  (cost=0.00..576.94 rows=26220 width=0) (actual time=1.134..1.134 rows=26264 loops=1)
+        Index Cond: (tenant_id = 'fd0f152e-193a-4274-8f5a-4393c1de9bb4'::uuid)
+        Buffers: shared hit=97
+Planning:
+  Buffers: shared hit=6
+Planning Time: 0.098 ms
+Execution Time: 7.231 ms
+```
+
+## Statistieken (geschatte rijen per tabel, pg_stats voor de gebruikte kolommen)
+```
+orders: ~60000 rijen, 1504 pagina's
+  orders.created_at: null_frac=0.000 n_distinct=-0.9994 correlation=0.006
+  orders.currency: null_frac=0.000 n_distinct=1.0 correlation=1.0 mcv={EUR} freqs={1}
+  orders.id: null_frac=0.000 n_distinct=-1.0 correlation=-0.009
+  orders.status: null_frac=0.000 n_distinct=8.0 correlation=0.299 mcv={delivered} freqs={0.44843334}
+  orders.tenant_id: null_frac=0.000 n_distinct=3.0 correlation=-0.476 mcv={fd0f152e-193a-4274-8f5a-4393c1de9bb4,72a298e2-36f5-4754-b57f-9f97747fd90b,eda10556-85a0-4d84-9170-5f623dba6c52} freqs={0.437,0.31076667,0.25223333}
+  orders.total_cents: null_frac=0.000 n_distinct=-0.82488334 correlation=-0.148 mcv={71304,46429,142608,139287,92858,37798,213912,37771,75542,232145,117733,285216,75596,185716,427824,53718,356520,10104,27… freqs={0.0028,0.0023333333,0.0015333333,0.0013666666,0.0013333333,0.001,0.00086666667,0.0007,0.0007,0.00066666666,0.0006333333…
+```
+
+Herschrijf de query zodat die sneller is en exact hetzelfde resultaat geeft.

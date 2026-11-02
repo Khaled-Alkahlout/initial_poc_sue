@@ -1,0 +1,3 @@
+cand_iqr_ms,cand_median_ms,candidate,case,condition,detail,expected,failing_param_sets,faster,fault,flagged_not_equivalent,input_tokens,llm_seconds,model,orig_iqr_ms,orig_median_ms,output_tokens,param_sets,rep,reps,speedup,unchanged,verdict
+1.4,26.4,LLM_C1_query_r1,revenue_orders,C1_query,,unknown,0,False,llm,False,620,5.9,claude-sonnet-5-5,0.9,25.7,365,8,1,7,0.97,False,EQUIVALENT_NOT_FASTER
+2.6,27.0,LLM_C3_plan_r1,revenue_orders,C3_plan,,unknown,0,False,llm,False,1788,3.9,claude-sonnet-5-5,0.6,26.1,388,8,1,7,0.97,False,EQUIVALENT_NOT_FASTER

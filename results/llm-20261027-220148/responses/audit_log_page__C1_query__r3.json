@@ -1,0 +1,8 @@
+{
+  "text": "```sql\nSELECT a.id,\n       a.tenant_id,\n       a.table_name,\n       a.row_id,\n       a.action,\n       a.old_data,\n       a.new_data,\n       a.actor_id,\n       a.is_system,\n       a.created_at\n  FROM audit_log a\n WHERE a.tenant_id = %(tenant_id)s\n   AND (%(table_name)s::text IS NULL OR a.table_name = %(table_name)s)\n   AND (%(row_id)s::uuid IS NULL OR a.row_id = %(row_id)s)\n   AND a.created_at >= %(from)s\n   AND a.created_at <  %(to)s\n ORDER BY a.created_at DESC, a.id DESC\n LIMIT %(limit)s OFFSET %(offset)s\n```\n\nIk zie geen herschrijving die zonder schemawijzigingen aantoonbaar sneller is. De parameters worden client-side als literals ingevuld, dus de planner vouwt de optionele `IS NULL`-filters al weg. Een subquery of deferred join levert hier niets op, omdat de filtering de heap toch moet lezen. De echte winst zit in een index op `(tenant_id, created_at DESC, id DESC)`, maar dat valt buiten deze opdracht.",
+  "input_tokens": 735,
+  "output_tokens": 856,
+  "seconds": 7.8,
+  "sql": "SELECT a.id,\n       a.tenant_id,\n       a.table_name,\n       a.row_id,\n       a.action,\n       a.old_data,\n       a.new_data,\n       a.actor_id,\n       a.is_system,\n       a.created_at\n  FROM audit_log a\n WHERE a.tenant_id = %(tenant_id)s\n   AND (%(table_name)s::text IS NULL OR a.table_name = %(table_name)s)\n   AND (%(row_id)s::uuid IS NULL OR a.row_id = %(row_id)s)\n   AND a.created_at >= %(from)s\n   AND a.created_at <  %(to)s\n ORDER BY a.created_at DESC, a.id DESC\n LIMIT %(limit)s OFFSET %(offset)s",
+  "model": "claude-sonnet-5-5"
+}

@@ -1,0 +1,115 @@
+## Originele query
+```sql
+-- name: top_products
+-- owner: merchandising
+-- params: tenant_id, from, to, limit
+-- Best sellers by units and revenue. Line items reference the variant by its
+-- string id (integration feed), so it is cast when joining the catalog.
+SELECT p.id,
+       p.sku,
+       p.name,
+       p.brand,
+       p.currency,
+       count(DISTINCT o.id)        AS order_count,
+       sum(ol.quantity)            AS quantity,
+       sum(ol.line_total_cents)    AS revenue_cents,
+       count(DISTINCT pv.id)       AS variant_count
+  FROM order_lines ol
+  JOIN orders o           ON o.id = ol.order_id
+  JOIN product_variants pv ON pv.id = ol.variant_id::uuid
+  JOIN products p         ON p.id = pv.product_id
+ WHERE o.tenant_id = %(tenant_id)s
+   AND o.created_at >= %(from)s
+   AND o.created_at <  %(to)s
+   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')
+ GROUP BY p.id, p.sku, p.name, p.brand, p.currency
+ ORDER BY quantity DESC, revenue_cents DESC
+ LIMIT %(limit)s
+```
+
+## Schema van de gebruikte tabellen (kolommen, constraints, indexen)
+```
+TABLE order_lines (
+  id uuid NOT NULL,
+  order_id uuid NOT NULL,
+  product_id uuid,
+  variant_id text,
+  sku text NOT NULL,
+  name text NOT NULL,
+  quantity integer NOT NULL,
+  unit_price_cents bigint NOT NULL,
+  line_total_cents bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (product_id) REFERENCES products(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX order_lines_pkey ON public.order_lines USING btree (id)
+TABLE orders (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  status text NOT NULL,
+  currency text NOT NULL,
+  subtotal_cents bigint NOT NULL,
+  discount_cents bigint NOT NULL,
+  shipping_cents bigint NOT NULL,
+  total_cents bigint NOT NULL,
+  shipping_address_id uuid,
+  billing_address_id uuid,
+  notes text,
+  channel text NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  promotion_id uuid,
+  reference text
+)
+  CONSTRAINT FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX orders_created_at_tenant_idx ON public.orders USING btree (created_at, tenant_id)
+  CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)
+  CREATE INDEX orders_total_eur_idx ON public.orders USING btree (tenant_id, ((total_cents / 100)) DESC)
+TABLE product_variants (
+  id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  sku text NOT NULL,
+  name text NOT NULL,
+  price_cents bigint NOT NULL,
+  weight_grams integer,
+  is_active boolean NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  attributes jsonb NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX product_variants_pkey ON public.product_variants USING btree (id)
+TABLE products (
+  id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  category_id uuid,
+  sku text NOT NULL,
+  name text NOT NULL,
+  slug text NOT NULL,
+  description text,
+  thumbnail bytea,
+  brand text,
+  price_cents bigint NOT NULL,
+  currency text NOT NULL,
+  status text NOT NULL,
+  created_at timestamp with time zone NOT NULL,
+  updated_at timestamp with time zone NOT NULL,
+  view_count bigint NOT NULL,
+  last_viewed_at timestamp with time zone,
+  attributes jsonb NOT NULL
+)
+  CONSTRAINT FOREIGN KEY (category_id) REFERENCES categories(id)
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX products_pkey ON public.products USING btree (id)
+```
+
+Herschrijf de query zodat die sneller is en exact hetzelfde resultaat geeft.

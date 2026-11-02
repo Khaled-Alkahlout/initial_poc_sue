@@ -1,0 +1,5 @@
+condition,n,ACCEPTED,"gelijk, geen winst",ongewijzigd,"gelijk, trager",fout,fout_pct,ACCEPTED_pct,mean_input_tokens,mean_output_tokens,cost_usd
+C1_query,12,3,0,6,2,1,8% [0-38],25% [5-57],776,1036,0.143
+C2_schema,12,3,0,5,3,1,8% [0-38],25% [5-57],1740,1075,0.171
+C3_plan,12,3,0,5,3,1,8% [0-38],25% [5-57],2827,1042,0.193
+C4_stats,12,3,0,6,3,0,0% [0-26],25% [5-57],4462,1093,0.238

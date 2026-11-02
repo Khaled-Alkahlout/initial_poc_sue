@@ -1,0 +1,8 @@
+{
+  "text": "Deze query is al minimaal: er is één tabel, alleen de benodigde kolommen worden geselecteerd en alle filters zijn sargable. Een herschrijving verandert het plan niet. Een winst is alleen te halen met een index op (tenant_id, created_at), en die mag ik niet aanmaken. Ik geef de query daarom ongewijzigd terug.\n\n```sql\nSELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')\n```",
+  "input_tokens": 1297,
+  "output_tokens": 266,
+  "seconds": 3.3,
+  "sql": "SELECT o.id,\n       o.created_at,\n       o.status,\n       o.total_cents,\n       o.currency\n  FROM orders o\n WHERE o.tenant_id = %(tenant_id)s\n   AND o.created_at >= %(from)s\n   AND o.created_at <  %(to)s\n   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')",
+  "model": "claude-sonnet-5-5"
+}

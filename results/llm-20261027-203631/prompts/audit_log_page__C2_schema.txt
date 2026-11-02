@@ -1,0 +1,54 @@
+## Originele query
+```sql
+-- name: audit_log_page
+-- owner: compliance
+-- params: tenant_id, table_name, row_id, from, to, limit, offset
+-- One page of the audit trail, newest first. table_name and row_id are
+-- optional; pass NULL to skip the filter.
+SELECT a.id,
+       a.tenant_id,
+       a.table_name,
+       a.row_id,
+       a.action,
+       a.old_data,
+       a.new_data,
+       a.actor_id,
+       a.is_system,
+       a.created_at
+  FROM audit_log a
+ WHERE a.tenant_id = %(tenant_id)s
+   AND (%(table_name)s::text IS NULL OR a.table_name = %(table_name)s)
+   AND (%(row_id)s::uuid IS NULL OR a.row_id = %(row_id)s)
+   AND a.created_at >= %(from)s
+   AND a.created_at <  %(to)s
+ ORDER BY a.created_at DESC, a.id DESC
+ LIMIT %(limit)s OFFSET %(offset)s
+```
+
+## Schema van de gebruikte tabellen (kolommen, constraints, indexen)
+```
+TABLE audit_log (
+  id uuid NOT NULL,
+  tenant_id uuid,
+  table_name text NOT NULL,
+  row_id uuid,
+  action text NOT NULL,
+  old_data jsonb,
+  new_data jsonb,
+  actor_id uuid,
+  is_system boolean NOT NULL,
+  created_at timestamp with time zone NOT NULL
+)
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX audit_log_created_at_idx ON public.audit_log USING btree (created_at)
+  CREATE INDEX audit_log_is_system_idx ON public.audit_log USING btree (is_system)
+  CREATE UNIQUE INDEX audit_log_pkey ON public.audit_log USING btree (id)
+  CREATE INDEX audit_log_row_id_idx ON public.audit_log USING btree (row_id)
+  CREATE INDEX audit_log_row_idx ON public.audit_log USING btree (row_id)
+  CREATE INDEX audit_log_table_name_idx ON public.audit_log USING btree (table_name)
+  CREATE INDEX audit_log_tenant_created_at_idx ON public.audit_log USING btree (tenant_id, created_at)
+  CREATE INDEX audit_log_tenant_idx ON public.audit_log USING btree (tenant_id)
+  CREATE INDEX audit_log_tenant_table_idx ON public.audit_log USING btree (tenant_id, table_name)
+```
+
+Herschrijf de query zodat die sneller is en exact hetzelfde resultaat geeft.
