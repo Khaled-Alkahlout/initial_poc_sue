@@ -1,5 +1,32 @@
 # SQL Rewrite Validator
 
+## Webdashboard — POC en Development
+
+De repository bevat een Next.js/React/TypeScript-dashboard met een dunne FastAPI-laag.
+Bekijk queryselectie, SQL-voorstellen, historische benchmarks, testdetails en
+afzonderlijke ontwikkelaarsreviews. Demo/replay en offline tests werken zonder
+PostgreSQL, API-key, AWS of betaalde modelcalls. Live uitvoering staat standaard uit.
+
+```powershell
+# Terminal 1, vanuit de repositoryhoofdmap:
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m uvicorn api.app:app --host 127.0.0.1 --port 8000
+
+# Terminal 2:
+cd frontend
+npm ci
+npm run dev
+```
+
+Open <http://127.0.0.1:3000> voor de POC en <http://127.0.0.1:3000/development>
+voor tests en evaluatie. Gebruik Node.js 22.12+ en één lokale API-worker.
+
+- [UI-architectuur en datastroom](docs/ui-architecture.md)
+- [Installatie, demo, configuratie en tests](docs/ui-development.md)
+- [Pagina's, componenten, API en databronnen uitbreiden](docs/ui-extension-guide.md)
+- [Opleverstatus, verificatie en volledige bestandenlijst](docs/ui-delivery.md)
+
 ## Optionele queryselectie (single-agent POC)
 
 Er is een zelfstandige filtering- en prioriteringslaag toegevoegd vóór de bestaande

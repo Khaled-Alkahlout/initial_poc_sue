@@ -1,0 +1,176 @@
+"""Thin REST routes. Domain operations live in services and existing modules."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Query, Request
+
+from api.schemas import (
+    Feedback,
+    FeedbackInput,
+    Overview,
+    QueryCollection,
+    QueryDetail,
+    RunDetail,
+    RunRequest,
+    RunSummary,
+    SystemStatus,
+    TestCollection,
+    TestExecution,
+    TestRecord,
+    TestRequest,
+)
+from api.services.artifacts import CASE_MAP
+from api.services.jobs import BusyError
+from api.services.privacy import redact
+
+router = APIRouter(prefix="/api")
+
+
+def require(value):
+    if value is None:
+        raise HTTPException(404, "Niet gevonden.")
+    return value
+
+
+def enqueue(request: Request, kind: str, config: dict):
+    try:
+        return request.app.state.jobs.start(kind, config)
+    except BusyError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/overview", response_model=Overview)
+def overview(request: Request):
+    return request.app.state.catalog.overview()
+
+
+@router.get("/queries", response_model=QueryCollection)
+def queries(
+    request: Request,
+    top_k: int = Query(2, ge=0, le=4),
+    exclude_query: list[str] = Query(default=[]),
+):
+    return request.app.state.catalog.queries(top_k, exclude_query)
+
+
+@router.get("/queries/{query_id}", response_model=QueryDetail)
+def query(query_id: str, request: Request):
+    return require(request.app.state.catalog.query(query_id))
+
+
+@router.get("/runs", response_model=list[RunSummary])
+def runs(request: Request):
+    return request.app.state.catalog.runs()
+
+
+@router.get("/runs/{run_id}", response_model=RunDetail)
+def run(run_id: str, request: Request):
+    return require(request.app.state.catalog.run(run_id))
+
+
+@router.post("/runs", response_model=RunDetail, status_code=202)
+def start_run(value: RunRequest, request: Request):
+    catalog = request.app.state.catalog
+    if value.query_id not in CASE_MAP:
+        raise HTTPException(422, "Alleen bestaande querycases zijn toegestaan.")
+    capability = next(
+        item for item in catalog.system().run_modes if item.id == value.mode
+    )
+    if not capability.available:
+        raise HTTPException(409, capability.reason)
+    if capability.executes_sql and not value.confirm_sql:
+        raise HTTPException(
+            422, "Bevestig expliciet de SQL-uitvoering op de testdatabase."
+        )
+    if capability.external_model and not value.confirm_external_model:
+        raise HTTPException(
+            422, "Bevestig expliciet het externe modelrequest en mogelijke kosten."
+        )
+    if value.mode == "mock" and value.condition != "C1_query":
+        raise HTTPException(
+            422,
+            "Offline mock ondersteunt alleen C1_query; overige context vereist een database.",
+        )
+    if (
+        value.mode == "replay"
+        and catalog.artifacts.replay(value.query_id, value.condition, value.source_id)
+        is None
+    ):
+        raise HTTPException(422, "Geen opgeslagen replay voor deze combinatie.")
+    job = enqueue(request, "run", value.model_dump())
+    return catalog.job_run(job)
+
+
+@router.get("/development/tests", response_model=TestCollection)
+def tests(request: Request):
+    collection = request.app.state.catalog.tests()
+    collection.tests = [
+        test.model_copy(update={"attempt": None}) for test in collection.tests
+    ]
+    return collection
+
+
+@router.get("/development/tests/{test_id}", response_model=TestRecord)
+def test(test_id: str, request: Request):
+    return require(request.app.state.catalog.test(test_id))
+
+
+@router.post("/development/tests/run", response_model=TestExecution, status_code=202)
+def run_tests(value: TestRequest, request: Request):
+    catalog = request.app.state.catalog
+    capability = next(
+        item for item in catalog.system().test_suites if item.id == value.suite
+    )
+    if not capability.available:
+        raise HTTPException(409, capability.reason)
+    if value.query_id not in CASE_MAP:
+        raise HTTPException(422, "Onbekende querycase.")
+    if capability.executes_sql and not value.confirm_sql:
+        raise HTTPException(
+            422, "Bevestig expliciet de SQL-uitvoering op de testdatabase."
+        )
+    job = enqueue(request, "test", value.model_dump())
+    return require(catalog.execution(job["id"]))
+
+
+@router.get("/development/executions/{job_id}", response_model=TestExecution)
+def execution(job_id: str, request: Request):
+    return require(request.app.state.catalog.execution(job_id))
+
+
+@router.get("/development/feedback", response_model=list[Feedback])
+def feedback(
+    request: Request, target_id: str | None = Query(default=None, max_length=240)
+):
+    return request.app.state.store.feedback(target_id)
+
+
+@router.post("/development/feedback", response_model=Feedback, status_code=201)
+def add_feedback(value: FeedbackInput, request: Request):
+    catalog = request.app.state.catalog
+    exists = (
+        catalog.run(value.target_id)
+        if value.target_type == "run"
+        else catalog.test(value.target_id)
+    )
+    if value.target_type == "attempt":
+        exists = next(
+            (
+                a
+                for run in catalog.runs()
+                for a in run.attempts
+                if a.id == value.target_id
+            ),
+            None,
+        )
+    if exists is None:
+        raise HTTPException(404, "Reviewdoel bestaat niet.")
+    safe = value.model_copy(
+        update={"comment": redact(value.comment), "reviewer": redact(value.reviewer)}
+    )
+    return request.app.state.store.add_feedback(safe)
+
+
+@router.get("/system/status", response_model=SystemStatus)
+def system_status(request: Request):
+    return request.app.state.catalog.system()
