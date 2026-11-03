@@ -115,6 +115,9 @@ export function QueryTable({ queries }: { queries: Query[] }) {
   const [decision, setDecision] = useState("all");
   const [analysis, setAnalysis] = useState("all");
   const [source, setSource] = useState("all");
+  const [minCalls, setMinCalls] = useState("");
+  const [minImpact, setMinImpact] = useState("");
+  const [page, setPage] = useState(0);
   const [sort, setSort] = useState<{ key: SortKey; direction: number }>({
     key: "rank",
     direction: 1,
@@ -130,7 +133,10 @@ export function QueryTable({ queries }: { queries: Query[] }) {
             (decision === "all" ||
               (decision === "selected" ? q.selected : q.status === decision)) &&
             (analysis === "all" || q.analyzed === (analysis === "analyzed")) &&
-            (source === "all" || q.is_synthetic === (source === "mock")),
+            (source === "all" || q.is_synthetic === (source === "mock")) &&
+            (!minCalls || (q.calls != null && q.calls >= Number(minCalls))) &&
+            (!minImpact ||
+              (q.impact_ms != null && q.impact_ms >= Number(minImpact))),
         )
         .sort((a, b) => {
           const left = a[sort.key],
@@ -144,11 +150,35 @@ export function QueryTable({ queries }: { queries: Query[] }) {
               : Number(left) - Number(right)) * sort.direction
           );
         }),
-    [queries, search, decision, analysis, source, sort],
+    [queries, search, decision, analysis, source, sort, minCalls, minImpact],
   );
+  const lastPage = Math.max(0, Math.ceil(visible.length / 25) - 1);
+  const currentPage = Math.min(page, lastPage);
   return (
     <>
       <div className="toolbar">
+        <Input
+          type="number"
+          min="0"
+          aria-label="Minimum aantal uitvoeringen"
+          placeholder="Min. calls"
+          value={minCalls}
+          onChange={(e) => {
+            setMinCalls(e.target.value);
+            setPage(0);
+          }}
+        />
+        <Input
+          type="number"
+          min="0"
+          aria-label="Minimum totale impact in ms"
+          placeholder="Min. impact · ms"
+          value={minImpact}
+          onChange={(e) => {
+            setMinImpact(e.target.value);
+            setPage(0);
+          }}
+        />
         <div className="search-wrap">
           <Search size={15} />
           <Input
@@ -227,18 +257,20 @@ export function QueryTable({ queries }: { queries: Query[] }) {
               </tr>
             </thead>
             <tbody>
-              {visible.map((query) => (
-                <tr key={query.query_id}>
-                  {columns.map((column) => (
-                    <td
-                      className={column.numeric ? "numeric" : ""}
-                      key={column.id}
-                    >
-                      {column.render(query)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {visible
+                .slice(currentPage * 25, (currentPage + 1) * 25)
+                .map((query) => (
+                  <tr key={query.query_id}>
+                    {columns.map((column) => (
+                      <td
+                        className={column.numeric ? "numeric" : ""}
+                        key={column.id}
+                      >
+                        {column.render(query)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
@@ -249,6 +281,23 @@ export function QueryTable({ queries }: { queries: Query[] }) {
         />
       )}
       <div className="table-footer">
+        {visible.length > 25 && (
+          <span>
+            <button
+              disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              Vorige
+            </button>{" "}
+            · {currentPage + 1} / {lastPage + 1} ·{" "}
+            <button
+              disabled={currentPage === lastPage}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Volgende
+            </button>
+          </span>
+        )}
         <span>
           {visible.length} van {queries.length} querypatronen
         </span>

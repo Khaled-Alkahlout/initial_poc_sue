@@ -13,6 +13,8 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/states";
 import { conditionLabels } from "@/lib/formatters";
 import { StartRun } from "@/features/runs/start-run";
+import { AnalysisWorkspace } from "./analysis-workspace";
+import { Button } from "@/components/ui/button";
 
 export function QueryDetailView({
   query,
@@ -35,17 +37,25 @@ export function QueryDetailView({
         title={query.query_id}
         description="Inspecteer SQL, selectiebeslissingen en beschikbare resultaten. Het openen van deze pagina voert niets uit."
         action={
-          <StartRun
-            queries={[query]}
-            queryId={query.query_id}
-            system={system}
-          />
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <a href="#ai-workspace">Analyze with AI</a>
+            </Button>
+            <StartRun
+              queries={[query]}
+              queryId={query.query_id}
+              system={system}
+            />
+          </div>
         }
       />
       <SqlViewer sql={query.sql} title="Originele SQL · bestaande fixture" />
       <div className="grid-two">
         <QueryMetrics query={query} />
         <QueryDecision query={query} />
+      </div>
+      <div id="ai-workspace">
+        <AnalysisWorkspace key={query.query_id} query={query} system={system} />
       </div>
       {context ? (
         <ContextViewer attempt={context} />

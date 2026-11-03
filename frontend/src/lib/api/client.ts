@@ -13,12 +13,19 @@ import {
   type FeedbackInput,
   type RunInput,
   type TestInput,
+  aiSettingsSchema,
+  aiTestSchema,
+  generationSettingsSchema,
+  type GenerationSettings,
 } from "./contracts";
 
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public code?: string,
+    public requestId?: string,
+    public path?: string,
   ) {
     super(message);
   }
@@ -49,12 +56,33 @@ export async function request<T>(
   }
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const detail = z.object({ detail: z.string() }).safeParse(body);
+    const detail = z
+      .object({
+        detail: z.string().optional(),
+        error_code: z.string().optional(),
+        request_id: z.string().optional(),
+      })
+      .safeParse(body);
+    const info = detail.success ? detail.data : {};
+    const reference =
+      info.request_id ?? response.headers.get("X-Request-ID") ?? undefined;
+    const category =
+      info.error_code === "llm_request_failed"
+        ? "AI-modelverzoek mislukt."
+        : response.status === 400 || response.status === 422
+          ? "Ongeldige invoer."
+          : response.status === 503
+            ? "Backend of afhankelijkheid tijdelijk niet beschikbaar."
+            : response.status >= 500
+              ? "Interne backendfout."
+              : "API-verzoek geweigerd.";
+    const message = `${category} ${info.detail ?? `HTTP ${response.status}.`}`;
     throw new ApiError(
-      detail.success
-        ? detail.data.detail
-        : `API-verzoek mislukt (${response.status}). Controleer de invoer.`,
+      `${message} Endpoint: /api${path.split("?")[0]}.${reference ? ` Referentie: ${reference}.` : ""}`,
       response.status,
+      info.error_code,
+      reference,
+      path,
     );
   }
   const parsed = schema.safeParse(body);
@@ -68,6 +96,33 @@ export async function request<T>(
 
 const id = encodeURIComponent;
 export const api = {
+  recordRewriteDisplay: (runId: string, sqlDisplayed: boolean) =>
+    fetch(`/api/runs/${id(runId)}/rewrite-display`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sql_displayed: sqlDisplayed }),
+    }),
+  getAISettings: () =>
+    request("/settings/ai", aiSettingsSchema, {
+      signal: AbortSignal.timeout(30000),
+    }),
+  saveAISettings: (value: GenerationSettings) =>
+    request("/settings/ai", generationSettingsSchema, {
+      method: "PUT",
+      body: JSON.stringify(value),
+      signal: AbortSignal.timeout(30000),
+    }),
+  resetAISettings: () =>
+    request("/settings/ai/reset", generationSettingsSchema, {
+      method: "POST",
+      signal: AbortSignal.timeout(30000),
+    }),
+  testAIGeneration: () =>
+    request("/settings/ai/test", aiTestSchema, {
+      method: "POST",
+      body: JSON.stringify({ confirm_external_model: true }),
+      signal: AbortSignal.timeout(90000),
+    }),
   getOverview: () => request("/overview", overviewSchema),
   getQueries: (topK = 2, excludedIds: string[] = []) =>
     request(

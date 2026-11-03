@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 export function StartRun({
   queries,
   system,
-  label = "Demo starten",
+  label = "POC starten",
   queryId,
   sourceId,
 }: {
@@ -24,10 +24,13 @@ export function StartRun({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const useRealModel =
+    !sourceId &&
+    system.run_modes.some((mode) => mode.id === "analysis" && mode.available);
   const [input, setInput] = useState<RunInput>({
-    mode: "replay",
+    mode: useRealModel ? "analysis" : "replay",
     query_id: queryId ?? queries[0]?.query_id ?? "",
-    condition: "C2_schema",
+    condition: useRealModel ? "C4_stats" : "C2_schema",
     source_id: sourceId,
     confirm_sql: false,
     confirm_external_model: false,
@@ -39,7 +42,12 @@ export function StartRun({
     setInput({
       ...input,
       mode,
-      condition: mode === "mock" ? "C1_query" : "C2_schema",
+      condition:
+        mode === "mock"
+          ? "C1_query"
+          : mode === "analysis"
+            ? "C4_stats"
+            : "C2_schema",
       confirm_sql: false,
       confirm_external_model: false,
     });
@@ -62,14 +70,14 @@ export function StartRun({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
+        <Button variant="outline">
           <Play size={14} />
           {label}
         </Button>
       </DialogTrigger>
       <DialogContent
-        title="Gecontroleerde run starten"
-        description="Kies een bestaande querycase. Replay gebruikt historische resultaten en voert geen SQL of modelrequest uit."
+        title="POC uitvoeren"
+        description="Kies Live POC voor echt AI-advies zonder database. Replay toont bestaande resultaten. SQL-tests zijn afzonderlijk beveiligd."
       >
         <form className="form-grid" onSubmit={submit}>
           <label className="field">
@@ -89,19 +97,32 @@ export function StartRun({
               value={input.mode}
               onChange={(e) => changeMode(e.target.value as RunInput["mode"])}
             >
-              {system.run_modes.map((item) => (
-                <option
-                  key={item.id}
-                  value={item.id}
-                  disabled={!item.available}
-                >
-                  {item.label}
-                  {!item.available ? " · niet geconfigureerd" : ""}
-                </option>
-              ))}
+              {system.run_modes
+                .filter((item) => item.id !== "validate")
+                .map((item) => (
+                  <option
+                    key={item.id}
+                    value={item.id}
+                    disabled={!item.available}
+                  >
+                    {item.label}
+                    {!item.available ? " · niet beschikbaar" : ""}
+                  </option>
+                ))}
             </Select>
           </label>
           <p className="notice notice-blue">{capability?.reason}</p>
+          {capability?.external_model && (
+            <p className="text-xs muted">
+              Provider:{" "}
+              <strong>{system.provider ?? "ingesteld op de server"}</strong> ·
+              Model:{" "}
+              <span className="mono">
+                {system.configured_model ?? "ingesteld op de server"}
+              </span>
+              . Eén verzoek na jouw bevestiging.
+            </p>
+          )}
           <label className="field">
             <span>Contextconditie</span>
             <Select
@@ -171,12 +192,22 @@ export function StartRun({
             >
               Annuleren
             </Button>
-            <Button type="submit" disabled={busy || !capability?.available}>
+            <Button
+              type="submit"
+              disabled={
+                busy ||
+                !capability?.available ||
+                (capability.external_model && !input.confirm_external_model) ||
+                (capability.executes_sql && !input.confirm_sql)
+              }
+            >
               {busy
                 ? "In wachtrij zetten…"
                 : input.mode === "replay"
                   ? "Replay starten"
-                  : "Run starten"}
+                  : input.mode === "analysis"
+                    ? "Echte AI-analyse starten"
+                    : "Run starten"}
             </Button>
           </div>
         </form>

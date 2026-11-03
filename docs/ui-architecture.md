@@ -14,6 +14,10 @@ Prism SQL-highlighting en Recharts de twee inhoudelijke grafieken.
 
 ## Datastroom
 
+Sinds 3 november is ook [gestructureerde OpenRouter-analyse](openrouter.md)
+aangesloten. `analysis` vereist geen database; `validate` test het opgeslagen
+voorstel afzonderlijk. De oudere live/replay-workflows hieronder blijven bestaan.
+
 ```mermaid
 flowchart TD
     Pages["Next.js App Router<br/>POC + Development"] --> Client["Typed API-client + Zod"]
@@ -26,6 +30,10 @@ flowchart TD
     Routes --> Queue["JobManager<br/>1 actief + 1 wachtend"]
     Queue --> Worker["Begrensd Python-workerproces"]
     Worker --> Selection
+    Worker --> Analysis["analysis: historische context → OpenRouter → Pydantic"]
+    Analysis --> Store
+    Worker --> Validate["validate: opgeslagen voorstel → SQL-gates → evaluate"]
+    Validate --> DB
     Worker --> Replay["Historische replay<br/>geen nieuwe meting"]
     Replay --> Historical
     Worker --> Offline["Offline mock<br/>C1 + mockmodel + static_check"]
@@ -135,6 +143,8 @@ sequenceDiagram
 | Offline mock        | Nieuwe selectie, C1-fixturecontext, bestaande mockmodelcall en statische controle. Geen DB; correctheid/benchmark niet uitgevoerd. |
 | Testdatabase + mock | Bestaande context en evaluate op de bevestigde testdatabase; model geeft origineel terug.                                          |
 | Live POC            | Zelfde pad met precies één expliciet toegestaan extern modelrequest.                                                               |
+| AI-analyse          | Eén gestructureerd OpenRouter-request zonder database; advies blijft ongetest.                                                     |
+| Voorstelvalidatie   | Afzonderlijk opgeslagen voorstel testen na SQL-gates; geen nieuw modelrequest.                                                     |
 
 Het Explorer-budget geldt voor de getoonde selectie. Een expliciete run kiest
 één fixture en past top-1-selectie toe op die gekozen subset. Iedere run bewaart

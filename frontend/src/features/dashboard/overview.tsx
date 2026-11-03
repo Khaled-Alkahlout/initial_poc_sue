@@ -21,6 +21,7 @@ import { PipelineVisualizer } from "@/components/pipeline/pipeline-visualizer";
 import { RunTable } from "@/components/pipeline/run-table";
 import { ImpactChart } from "@/components/charts/impact-chart";
 import { StartRun } from "@/features/runs/start-run";
+import { PriorityTable } from "@/components/queries/priority-table";
 
 const icons = [Database, Filter, CheckCheck, Sparkles];
 export function OverviewDashboard({
@@ -157,6 +158,7 @@ export function OverviewDashboard({
         />
         <RunTable runs={data.recent_runs} />
       </Card>
+      <PriorityTable queries={data.queries} />
       <div className="notice">
         <Info size={15} />
         <p>

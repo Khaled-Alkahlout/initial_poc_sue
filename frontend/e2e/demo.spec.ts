@@ -30,7 +30,10 @@ test("POC demo: query inspecteren, replay starten en review bewaren", async ({
   await expect(
     page.getByRole("heading", { name: "top_products", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Demo starten" }).click();
+  await page.getByRole("button", { name: "POC starten" }).click();
+  await page
+    .getByRole("combobox", { name: "Uitvoermodus" })
+    .selectOption("replay");
   await page.getByRole("button", { name: "Replay starten" }).click();
   await expect(page).toHaveURL(/\/runs\/[a-f0-9-]+$/);
   await expect(page.getByText("Afgerond", { exact: true })).toBeVisible({
@@ -121,4 +124,24 @@ test("client toont een API-fout zonder vervangende successen", async ({
   await expect(
     page.getByRole("alert").filter({ hasText: "niet bereikbaar" }),
   ).toBeVisible();
+});
+
+test("AI-workspace toont configuratie en vraagt expliciete bevestiging", async ({
+  page,
+}) => {
+  await page.goto("/queries/top_products");
+  await expect(
+    page.getByRole("heading", { name: "Analyze with AI", exact: true }),
+  ).toBeVisible();
+  await page.locator("#ai-workspace").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: "test-results/analysis-workspace.png",
+    fullPage: false,
+  });
+  await expect(
+    page.getByText("Gesimuleerd", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Analyze with AI", exact: true }),
+  ).toBeDisabled();
 });

@@ -25,6 +25,8 @@ export const mode = z.enum([
   "mock",
   "live_mock",
   "live",
+  "analysis",
+  "validate",
 ]);
 const lifecycle = z.enum(["PENDING", "RUNNING", "COMPLETED", "FAILED"]);
 export const condition = z.enum([
@@ -66,6 +68,60 @@ const contextSchema = z.object({
   note: z.string(),
 });
 export const attemptSchema = z.object({
+  diagnostics: z
+    .object({
+      http_status: z.number().nullable().optional(),
+      model: z.string().optional(),
+      finish_reason: z.string().nullable().optional(),
+      native_finish_reason: z.string().nullable().optional(),
+      input_tokens: z.number().nullable().optional(),
+      output_tokens: z.number().nullable().optional(),
+      reasoning_tokens: z.number().nullable().optional(),
+      total_tokens: z.number().nullable().optional(),
+      configured_max_output_tokens: z.number().nullable().optional(),
+      reasoning_effort: z.string().nullable().optional(),
+      seconds: z.number().nullable().optional(),
+      error_code: z.string().nullable().optional(),
+      exception_type: z.string().optional(),
+      visible_content_length: z.number().optional(),
+      cost_usd: z.number().nullable().optional(),
+      cost_kind: z.string().nullable().optional(),
+      rewrite_requested: z.boolean().optional(),
+      model_returned_candidate: z.boolean().nullable().optional(),
+      structured_parse_success: z.boolean().optional(),
+      static_validation_accepted: z.boolean().nullable().optional(),
+      sql_stored_success: z.boolean().nullable().optional(),
+      frontend_sql_displayed: z.boolean().nullable().optional(),
+      candidate_rejection_reason: z.string().nullable().optional(),
+      secure_output_preserved: z.boolean().optional(),
+      response_schema_version: z.number().optional(),
+    })
+    .optional(),
+  partial_response: z.string().nullable().optional(),
+  analysis: z
+    .object({
+      schema_version: z.union([z.literal(1), z.literal(2)]).optional(),
+      rewrite_status: z
+        .enum(["candidate", "no_safe_rewrite", "insufficient_context"])
+        .nullable()
+        .optional(),
+      rewrite_explanation: z.string().nullable().optional(),
+      problem: z.string(),
+      root_cause: z.string(),
+      optimized_sql: z.string().nullable(),
+      index_recommendations: z.array(z.string()),
+      expected_benefit: z.string(),
+      correctness_risks: z.array(z.string()),
+      uncertainty: z.string(),
+      validation_recommendations: z.array(z.string()),
+      missing_context: z.array(z.string()),
+    })
+    .nullable()
+    .optional(),
+  provider: z.string().nullable().optional(),
+  cost_usd: z.number().nullable().optional(),
+  cost_kind: z.string().nullable().optional(),
+  validation_state: z.string().nullable().optional(),
   id: z.string(),
   run_id: z.string(),
   query_id: z.string(),
@@ -211,6 +267,12 @@ const capabilitySchema = z.object({
   external_model: z.boolean(),
 });
 export const systemSchema = z.object({
+  provider: z.string().nullable().optional(),
+  configured_model: z.string().nullable().optional(),
+  model_status: z.string().optional(),
+  configuration_error: z.string().nullable().optional(),
+  sql_enabled: z.boolean().optional(),
+  test_database_confirmed: z.boolean().optional(),
   api_status: z.string(),
   database_status: z.string(),
   database_configured: z.boolean(),
@@ -247,10 +309,11 @@ export type TestRecord = z.infer<typeof testSchema>;
 export type SystemStatus = z.infer<typeof systemSchema>;
 export type Feedback = z.infer<typeof feedbackSchema>;
 export type RunInput = {
-  mode: "replay" | "mock" | "live_mock" | "live";
+  mode: "replay" | "mock" | "live_mock" | "live" | "analysis" | "validate";
   query_id: string;
   condition: z.infer<typeof condition>;
   source_id?: string;
+  rewrite_only?: boolean;
   confirm_sql: boolean;
   confirm_external_model: boolean;
 };
@@ -263,3 +326,38 @@ export type TestInput = {
   query_id: string;
   confirm_sql: boolean;
 };
+
+export const generationSettingsSchema = z.object({
+  max_output_tokens: z.number().nullable(),
+  reasoning_effort: z.enum(["disabled", "low", "medium", "high"]),
+  temperature: z.number().nullable(),
+});
+export type GenerationSettings = z.infer<typeof generationSettingsSchema>;
+export const aiSettingsSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  key_configured: z.boolean(),
+  llm_enabled: z.boolean(),
+  settings: generationSettingsSchema,
+  defaults: generationSettingsSchema,
+  capabilities: z
+    .object({
+      reasoning_efforts: z.array(z.string()),
+      temperature_supported: z.boolean(),
+      max_output_tokens: z.number().nullable(),
+      provider_default_supported: z.boolean(),
+      max_tokens_supported: z.boolean(),
+    })
+    .nullable(),
+  capabilities_error: z.string().nullable(),
+  precedence: z.string(),
+  sql_enabled: z.boolean(),
+  test_database_confirmed: z.boolean(),
+});
+export type AISettings = z.infer<typeof aiSettingsSchema>;
+export const aiTestSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+  diagnostics: attemptSchema.shape.diagnostics,
+  test_settings: generationSettingsSchema,
+});

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
+from llm.analysis import Analysis
 
 StageStatus = Literal[
     "pending",
@@ -16,7 +17,9 @@ StageStatus = Literal[
     "error",
 ]
 Lifecycle = Literal["PENDING", "RUNNING", "COMPLETED", "FAILED"]
-Mode = Literal["historical", "replay", "mock", "live_mock", "live"]
+Mode = Literal[
+    "historical", "replay", "mock", "live_mock", "live", "analysis", "validate"
+]
 Condition = Literal["C1_query", "C2_schema", "C3_plan", "C4_stats"]
 Outcome = Literal[
     "accepted",
@@ -59,6 +62,8 @@ class ContextSection(BaseModel):
 
 
 class Attempt(BaseModel):
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+    partial_response: str | None = None
     id: str
     run_id: str
     query_id: str
@@ -84,6 +89,11 @@ class Attempt(BaseModel):
     context: list[ContextSection] = Field(default_factory=list)
     raw_record: dict[str, Any] = Field(default_factory=dict)
     origin: str = "historical"
+    analysis: Analysis | None = None
+    provider: str | None = None
+    cost_usd: float | None = None
+    cost_kind: str | None = None
+    validation_state: str | None = None
 
 
 class RunSummary(BaseModel):
@@ -211,12 +221,23 @@ class StrictInput(BaseModel):
 
 
 class RunRequest(StrictInput):
-    mode: Literal["replay", "mock", "live_mock", "live"] = "replay"
+    mode: Literal["replay", "mock", "live_mock", "live", "analysis", "validate"] = (
+        "replay"
+    )
     query_id: str = Field(min_length=1, max_length=80)
     condition: Condition = "C2_schema"
     source_id: str | None = Field(default=None, max_length=100)
     confirm_sql: bool = False
     confirm_external_model: bool = False
+    rewrite_only: bool = False
+
+
+class RewriteDisplay(StrictInput):
+    sql_displayed: bool
+
+
+class AIConnectionTest(StrictInput):
+    confirm_external_model: Literal[True]
 
 
 class TestRequest(StrictInput):
@@ -248,6 +269,12 @@ class Capability(BaseModel):
 
 
 class SystemStatus(BaseModel):
+    provider: str | None = None
+    configured_model: str | None = None
+    model_status: str = "not_configured"
+    configuration_error: str | None = None
+    sql_enabled: bool = False
+    test_database_confirmed: bool = False
     api_status: str = "available"
     database_status: str = "not_checked"
     database_configured: bool

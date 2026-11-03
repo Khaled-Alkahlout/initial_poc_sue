@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import { ArrowLeft, Info } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { Run } from "@/lib/api/contracts";
@@ -19,17 +20,26 @@ import { Select } from "@/components/ui/fields";
 import { PipelineVisualizer } from "@/components/pipeline/pipeline-visualizer";
 import { AttemptPanels } from "@/components/evaluation/attempt-panels";
 import { FeedbackForm } from "@/components/evaluation/feedback-form";
+import { ValidateProposal } from "@/features/runs/validate-proposal";
+import { RetryAnalysis } from "./retry-analysis";
 
 const active = (run: Run) => ["PENDING", "RUNNING"].includes(run.lifecycle);
 export function RunDetail({
   initial,
   initialAttemptId,
+  onUpdate,
+  rewriteAction,
 }: {
   initial: Run;
   initialAttemptId?: string;
+  onUpdate?: (run: Run) => void;
+  rewriteAction?: ReactNode;
 }) {
   const loader = useCallback(() => api.getRun(initial.id), [initial.id]);
   const { data: run, error, refresh } = useApi(loader, initial, active);
+  useEffect(() => {
+    if (run && onUpdate) onUpdate(run);
+  }, [run, onUpdate]);
   const [index, setIndex] = useState(() =>
     Math.max(
       0,
@@ -129,7 +139,13 @@ export function RunDetail({
         />
         <PipelineVisualizer stages={attempt?.stages ?? run.stages} />
       </Card>
-      {attempt && <AttemptPanels attempt={attempt} />}
+      {attempt && (
+        <AttemptPanels attempt={attempt} rewriteAction={rewriteAction} />
+      )}
+      {run.mode === "analysis" && run.lifecycle === "FAILED" && (
+        <RetryAnalysis run={run} />
+      )}
+      {run.mode === "analysis" && attempt && <ValidateProposal run={run} />}
       {run.selection && (
         <JsonInspector
           value={run.selection}

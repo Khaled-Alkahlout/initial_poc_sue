@@ -146,11 +146,16 @@ def adapt_attempt(
         outcome, correctness = "inconclusive", "inconclusive"
 
     original = CASE_MAP.get(query_id)
-    proposed = (
-        response.get("sql")
-        if response and isinstance(response.get("sql"), str)
-        else None
-    )
+    proposed, extraction_error = None, None
+    if response:
+        from llm.analysis import legacy_sql, AnalysisError
+
+        try:
+            proposed = legacy_sql(response)
+        except AnalysisError as exc:
+            extraction_error = str(exc)
+            outcome, correctness = "error", "skipped"
+            detail = extraction_error
     if handwritten and original:
         proposed = next(
             (c.sql for c in original.candidates if c.name == candidate), None
@@ -274,6 +279,13 @@ def adapt_attempt(
         else None
     )
     return Attempt(
+        diagnostics={
+            "structured_parse_success": False,
+            "error_code": "legacy_sql_invalid",
+        }
+        if extraction_error
+        else {},
+        validation_state="rewrite_parsing_failed" if extraction_error else None,
         id=f"{run_id}~{index}",
         run_id=run_id,
         query_id=query_id,

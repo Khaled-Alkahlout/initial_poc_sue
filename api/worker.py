@@ -10,6 +10,7 @@ from api.services.catalog import Catalog
 from api.services.privacy import redact
 from api.services.storage import Store
 from api.services.workflows import execute_run, execute_tests
+from api.services.runtime import ensure_current
 
 
 def main():
@@ -26,6 +27,7 @@ def main():
     try:
         # Recheck configuration inside the process; no bypass through queued inputs.
         config = job["config"]
+        ensure_current(config.get("runtime_revision"))
         capabilities = Catalog(settings, store).system()
         options = (
             capabilities.run_modes if job["kind"] == "run" else capabilities.test_suites
@@ -43,7 +45,8 @@ def main():
             if job["kind"] == "run"
             else execute_tests(job, settings)
         )
-        store.update(job_id, "COMPLETED", result=result)
+        if store.job(job_id)["status"] != "FAILED":
+            store.update(job_id, "COMPLETED", result=result)
     except (Exception, SystemExit) as exc:
         store.update(
             job_id, "FAILED", error=redact(f"{type(exc).__name__}: {exc}")[:1000]

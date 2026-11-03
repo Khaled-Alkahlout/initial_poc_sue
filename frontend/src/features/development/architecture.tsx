@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/shared/status";
 import { Card, CardHeader } from "@/components/ui/card";
 import { ArchitectureDiagram } from "@/components/pipeline/architecture-diagram";
+import { ProviderStatus } from "./provider-status";
 
 export function ArchitectureView({ system }: { system: SystemStatus }) {
   return (
@@ -13,6 +14,7 @@ export function ArchitectureView({ system }: { system: SystemStatus }) {
         title="Architectuur & diagnostiek"
         description="Expliciete componentgrenzen maken de POC uitlegbaar en uitbreidbaar. Configuratie is geen bewijs dat een databaseverbinding of modelrequest zal slagen."
       />
+      <ProviderStatus system={system} />
       <div className="metric-grid">
         {[
           {

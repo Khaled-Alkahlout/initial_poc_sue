@@ -91,6 +91,9 @@ def call_llm(prompt: str, model: str, max_tokens: int = 4000, original_sql: str 
     if model == "mock":
         text = f"```sql\n{original_sql}\n```\nMock: origineel ongewijzigd."
         return {"text": text, "input_tokens": 0, "output_tokens": 0, "seconds": 0.0}
+    if "/" in model or os.getenv("SUE_LLM_PROVIDER") == "openrouter":
+        from llm.analysis import chat
+        return chat([{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}], model, max_tokens=max_tokens)
     import anthropic  # pas hier, zodat --dry-run en mock zonder dit pakket werken
 
     if not os.environ.get("ANTHROPIC_API_KEY"):

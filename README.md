@@ -2,6 +2,13 @@
 
 ## Webdashboard — POC en Development
 
+**Nieuw:** [OpenRouter AI-analyse, configuratie en afzonderlijke validatie](docs/openrouter.md).
+Generatiebudget, reasoning en responsdiagnostiek zijn beschikbaar via **AI Settings**:
+zie [instellingen en werkelijke verificatie](docs/ai-settings.md).
+Open een query in de Analysis Workspace en kies **Analyze with AI**. Dit werkt
+met Claude Haiku via OpenRouter zonder database-uitvoering; validatie is een
+afzonderlijke opt-in op een opgeslagen voorstel. De API laadt een lokale `.env`.
+
 De repository bevat een Next.js/React/TypeScript-dashboard met een dunne FastAPI-laag.
 Bekijk queryselectie, SQL-voorstellen, historische benchmarks, testdetails en
 afzonderlijke ontwikkelaarsreviews. Demo/replay en offline tests werken zonder

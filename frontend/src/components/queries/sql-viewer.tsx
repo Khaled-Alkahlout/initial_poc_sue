@@ -54,14 +54,16 @@ export function SqlViewer({
 export function SqlComparison({
   original,
   proposed,
+  empty,
 }: {
   original: string | null;
   proposed: string | null;
+  empty?: string;
 }) {
   return (
     <div className="sql-compare">
-      <SqlViewer title="Originele query" sql={original} />
-      <SqlViewer title="Voorgestelde herschrijving" sql={proposed} />
+      <SqlViewer title="Original SQL" sql={original} />
+      <SqlViewer title="Proposed SQL" sql={proposed} empty={empty} />
     </div>
   );
 }

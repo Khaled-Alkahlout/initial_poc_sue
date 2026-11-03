@@ -11,18 +11,19 @@ export const navigation = [
     items: [
       { href: "/", label: "Overzicht", icon: LayoutDashboard },
       { href: "/queries", label: "Query Explorer", icon: Database },
-      { href: "/runs", label: "Pipeline-runs", icon: GitBranch },
+      { href: "/runs", label: "Analysehistorie", icon: GitBranch },
+      { href: "/settings", label: "AI Settings", icon: Blocks },
+      {
+        href: "/development/architecture",
+        label: "Systeemstatus",
+        icon: Blocks,
+      },
     ],
   },
   {
     label: "Development",
     items: [
       { href: "/development", label: "Tests & evaluatie", icon: FlaskConical },
-      {
-        href: "/development/architecture",
-        label: "Architectuur & diagnostiek",
-        icon: Blocks,
-      },
     ],
   },
 ];

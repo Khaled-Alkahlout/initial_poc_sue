@@ -87,12 +87,12 @@ describe("SQL en fases", () => {
       <SqlComparison original={sql} proposed="SELECT 2" />,
     );
     expect(
-      screen.getByRole("region", { name: "Originele query" }),
+      screen.getByRole("region", { name: "Original SQL" }),
     ).toBeInTheDocument();
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("pre")?.textContent).toBe(sql);
     await user.click(
-      screen.getByRole("button", { name: "Kopieer SQL: Originele query" }),
+      screen.getByRole("button", { name: "Kopieer SQL: Original SQL" }),
     );
     expect(copy).toHaveBeenCalledWith(sql);
   });

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from pydantic import ValidationError
 from collections import Counter
 
 from api.config import CONDITIONS, Settings
@@ -24,6 +25,7 @@ from api.schemas import (
 )
 from api.services.artifacts import Artifacts, CASE_MAP, LIMITATIONS, stage
 from api.services.storage import Store
+from api.services.errors import StoredResultError
 from query_selection.adapters import mock_telemetry
 from query_selection.policy import SelectionPolicy
 from query_selection.selection import select_queries
@@ -49,7 +51,10 @@ class Catalog:
     @staticmethod
     def job_run(job: dict) -> RunDetail:
         if job["result"]:
-            result = RunDetail.model_validate(job["result"])
+            try:
+                result = RunDetail.model_validate(job["result"])
+            except ValidationError as exc:
+                raise StoredResultError(job["id"], exc) from exc
             return result.model_copy(
                 update={
                     "lifecycle": job["status"],
@@ -65,6 +70,8 @@ class Catalog:
                 "mock": "Offline mock",
                 "live_mock": "Testdatabase / mockmodel",
                 "live": "Live POC",
+                "analysis": "AI-analyse · ongetest advies",
+                "validate": "Validatie opgeslagen AI-voorstel",
             }[config["mode"]],
             mode=config["mode"],
             lifecycle=job["status"],
@@ -101,7 +108,7 @@ class Catalog:
 
     def queries(self, top_k=2, excluded=()) -> QueryCollection:
         selection = self.selection(top_k, excluded)
-        historical = list(self.artifacts.runs.values())
+        historical = self.runs()
         queries = []
         for decision in sorted(
             selection.decisions, key=lambda d: (d.rank or 999, d.telemetry.query_id)
@@ -116,7 +123,9 @@ class Catalog:
                 a
                 for run in runs
                 for a in run.attempts
-                if a.query_id == query_id and a.model is not None
+                if a.query_id == query_id
+                and a.model not in {None, "mock"}
+                and run.mode not in {"replay", "validate", "mock", "live_mock"}
             ]
             queries.append(
                 QueryView(
@@ -202,7 +211,14 @@ class Catalog:
             for name in ("sqlglot", "psycopg", "anthropic")
         }
         database = bool(os.getenv("SUE_DATABASE_URL"))
-        model = bool(os.getenv("ANTHROPIC_API_KEY") and os.getenv("SUE_MODEL"))
+        from llm.analysis import configuration, AnalysisError
+
+        provider, model_name, error = None, None, None
+        try:
+            provider, model_name, key = configuration()
+            model = bool(key)
+        except AnalysisError as exc:
+            model, error = False, str(exc)
         sql_ready = (
             self.settings.enable_sql
             and self.settings.test_database_confirmed
@@ -210,10 +226,27 @@ class Catalog:
             and dependencies["psycopg"]
         )
         llm_ready = (
-            sql_ready
-            and self.settings.enable_llm
+            self.settings.enable_llm
             and model
-            and dependencies["anthropic"]
+            and (provider == "openrouter" or dependencies["anthropic"])
+        )
+        missing = []
+        if not self.settings.enable_llm:
+            missing.append("SUE_ENABLE_LLM=1")
+        if not model:
+            missing.append(
+                "OPENROUTER_API_KEY" if provider == "openrouter" else "providerkey"
+            )
+        if provider == "anthropic" and not dependencies["anthropic"]:
+            missing.append("Anthropic SDK")
+        llm_reason = error or (
+            "Echte AI-analyse via "
+            + str(provider)
+            + "; geen database nodig. SQL-validatie is een afzonderlijke stap."
+            if llm_ready
+            else "AI-analyse nog niet beschikbaar. Vereist: "
+            + ", ".join(missing)
+            + ". Werk .env bij en herstart de Python-API."
         )
         sql_reason = (
             "Alleen vooraf gedefinieerde cases op de expliciet bevestigde testdatabase; verbinding niet vooraf getest."
@@ -221,6 +254,12 @@ class Catalog:
             else "Vereist SUE_ENABLE_SQL_RUNS=1, SUE_TEST_DATABASE_CONFIRMED=1, server-side databaseconfiguratie en psycopg."
         )
         return SystemStatus(
+            provider=provider,
+            configured_model=model_name,
+            model_status="not_checked" if model else "not_configured",
+            configuration_error=error,
+            sql_enabled=self.settings.enable_sql,
+            test_database_confirmed=self.settings.test_database_confirmed,
             database_configured=database,
             model_configured=model,
             dependencies=dependencies,
@@ -228,6 +267,20 @@ class Catalog:
             historical_runs=len(self.artifacts.runs),
             historical_evaluations=len(self.artifacts.tests),
             run_modes=[
+                Capability(
+                    id="analysis",
+                    label="Live POC · echt AI-advies (zonder database)",
+                    available=llm_ready,
+                    reason=llm_reason,
+                    external_model=True,
+                ),
+                Capability(
+                    id="validate",
+                    label="Opgeslagen AI-voorstel valideren",
+                    available=sql_ready,
+                    reason=sql_reason,
+                    executes_sql=True,
+                ),
                 Capability(
                     id="replay",
                     label="Historische replay",
@@ -249,10 +302,9 @@ class Catalog:
                 ),
                 Capability(
                     id="live",
-                    label="Live POC · extern model",
-                    available=llm_ready,
-                    reason=sql_reason
-                    + " Extern model vereist bovendien SUE_ENABLE_LLM=1, SUE_MODEL, API-key en SDK.",
+                    label="AI + databasevalidatie · experimenteel",
+                    available=llm_ready and sql_ready,
+                    reason=sql_reason + " " + llm_reason,
                     executes_sql=True,
                     external_model=True,
                 ),
@@ -352,6 +404,39 @@ class Catalog:
                 origin="historical",
             ),
         ]
+        metrics.extend(
+            [
+                Metric(
+                    id="workload_calls",
+                    label="Demo-uitvoeringen",
+                    value=sum(q.calls for q in queries)
+                    if queries and all(q.calls is not None for q in queries)
+                    else None,
+                    note="Gesimuleerde workload, geen databaseobservaties",
+                    origin="synthetic",
+                ),
+                Metric(
+                    id="workload_total",
+                    label="Demo-workloadtijd · ms",
+                    value=sum(q.total_execution_time_ms for q in queries)
+                    if queries
+                    and all(q.total_execution_time_ms is not None for q in queries)
+                    else None,
+                    note="Totale belasting uit mocktelemetrie",
+                    origin="synthetic",
+                ),
+                Metric(
+                    id="new_analyses",
+                    label="Nieuwe AI-analyses",
+                    value=sum(
+                        r.mode == "analysis" and r.lifecycle == "COMPLETED"
+                        for r in self.runs()
+                    ),
+                    note="Nieuw gegenereerd; geen validatiebewijs",
+                    origin="current",
+                ),
+            ]
+        )
         conditions = []
         for condition in CONDITIONS:
             rows = [a for a in historical if a.condition == condition]

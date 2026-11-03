@@ -40,10 +40,21 @@ class WorkflowCompositionTests(unittest.TestCase):
             "seconds": 0.1,
         }
         with tempfile.TemporaryDirectory() as directory:
-            settings = Settings(root=ROOT, data_dir=Path(directory))
+            settings = Settings(
+                root=ROOT,
+                data_dir=Path(directory),
+                enable_sql=True,
+                test_database_confirmed=True,
+            )
             store = Store(settings.database_path)
             job = store.create_job(
-                "run", {"mode": "live", "query_id": case.name, "condition": "C2_schema"}
+                "run",
+                {
+                    "mode": "live",
+                    "query_id": case.name,
+                    "condition": "C2_schema",
+                    "confirm_sql": True,
+                },
             )
             with (
                 patch.dict(
@@ -88,6 +99,32 @@ class WorkflowCompositionTests(unittest.TestCase):
             self.assertEqual(result["model_requests"], 1)
             self.assertTrue(result["selection"]["selected"][0]["is_synthetic"])
             self.assertEqual(result["attempts"][0]["benchmark"]["origin"], "measured")
+            evaluate.reset_mock()
+            unsafe = {**response, "text": "```sql\nSELECT pg_sleep(100)\n```"}
+            with (
+                patch.dict(
+                    sys.modules,
+                    {
+                        "psycopg": driver,
+                        "scripts.run_validation": SimpleNamespace(evaluate=evaluate),
+                    },
+                ),
+                patch.dict(
+                    os.environ,
+                    {
+                        "SUE_DATABASE_URL": "postgresql://unit-test",
+                        "SUE_MODEL": "unit-provider",
+                    },
+                ),
+                patch("cases.cases.make_ctx", return_value={}),
+                patch(
+                    "llm.context.build_context", return_value={"query": case.original}
+                ),
+                patch("api.services.workflows.call_llm", return_value=unsafe),
+            ):
+                rejected = execute_run(job, settings, store)
+            evaluate.assert_not_called()
+            self.assertEqual(rejected["attempts"][0]["outcome"], "safety_rejected")
 
 
 if __name__ == "__main__":

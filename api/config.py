@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env", override=False)
 CONDITIONS = ("C1_query", "C2_schema", "C3_plan", "C4_stats")
 
 

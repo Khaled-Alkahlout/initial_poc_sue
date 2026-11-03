@@ -24,6 +24,18 @@ from query_selection.selection import select_queries
 
 
 def execute_run(job: dict, settings: Settings, store: Store) -> dict:
+    if job["config"]["mode"] in {"analysis", "validate"}:
+        from api.services.analysis import execute_analysis
+
+        return execute_analysis(job, settings, store)
+    if job["config"]["mode"] in {"live", "live_mock"} and not (
+        settings.enable_sql
+        and settings.test_database_confirmed
+        and job["config"].get("confirm_sql")
+    ):
+        raise ValueError(
+            "SQL-uitvoering vereist beide veiligheidsinstellingen en expliciete bevestiging."
+        )
     config, job_id = job["config"], job["id"]
     case = CASE_MAP[config["query_id"]]
     selection = select_queries(mock_telemetry([case]), SelectionPolicy(top_k=1))
@@ -149,23 +161,25 @@ def execute_run(job: dict, settings: Settings, store: Store) -> dict:
             else "Modelresponse ontvangen; geen correctheidsbewijs.",
             response["seconds"] * 1000,
         )
-        from validator.checker import static_check
+        from api.services.sql_safety import proposal_check
 
         started = perf_counter()
-        ok, reason = static_check(sql)
+        ok, reason = proposal_check(sql)
         mark(
             "static",
             "passed" if ok else "failed",
             reason,
             (perf_counter() - started) * 1000,
         )
-        if mode == "mock":
+        if mode == "mock" or not ok:
             row = {
                 "case": case.name,
                 "candidate": "offline_mock",
                 "verdict": "STATIC_ONLY" if ok else "REJECTED_STATIC",
                 "param_sets": 0,
-                "detail": "Geen SQL uitgevoerd: correctheid en performance zijn niet onderzocht.",
+                "detail": "Geen SQL uitgevoerd: correctheid en performance zijn niet onderzocht."
+                if ok
+                else reason,
             }
         else:
             from cases.classes.candidate import Candidate

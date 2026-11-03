@@ -1,4 +1,5 @@
 import type { Attempt } from "@/lib/api/contracts";
+import type { ReactNode } from "react";
 import { count, milliseconds } from "@/lib/formatters";
 import { Card, CardHeader } from "@/components/ui/card";
 import {
@@ -9,7 +10,8 @@ import {
 } from "@/components/shared/status";
 import { EmptyState } from "@/components/shared/states";
 import { JsonInspector } from "@/components/shared/json-inspector";
-import { SqlComparison } from "@/components/queries/sql-viewer";
+import { RewriteSummary } from "./rewrite-summary";
+import { AIUsage } from "./ai-usage";
 
 export function PerformanceComparison({ attempt }: { attempt: Attempt }) {
   const result = attempt.benchmark;
@@ -151,13 +153,98 @@ export function ContextViewer({ attempt }: { attempt: Attempt }) {
     </Card>
   );
 }
-export function AttemptPanels({ attempt }: { attempt: Attempt }) {
+export function AttemptPanels({
+  attempt,
+  rewriteAction,
+}: {
+  attempt: Attempt;
+  rewriteAction?: ReactNode;
+}) {
   return (
     <div className="stack">
-      <SqlComparison
-        original={attempt.original_sql}
-        proposed={attempt.proposed_sql}
-      />
+      {attempt.model && <AIUsage attempt={attempt} />}
+      <RewriteSummary attempt={attempt} />
+      {rewriteAction}
+      {attempt.analysis && (
+        <Card>
+          <CardHeader
+            title="AI-analyse · advies, geen bewezen verbetering"
+            description="Modelinterpretatie en kwalitatieve verwachtingen blijven gescheiden van gemeten resultaten."
+          />
+          <div className="panel-body stack">
+            {(
+              [
+                ["Probleem geïdentificeerd", attempt.analysis.problem],
+                ["Vermoedelijke oorzaak", attempt.analysis.root_cause],
+                [
+                  "Verwachte impact · hypothese",
+                  attempt.analysis.expected_benefit,
+                ],
+                ["Onzekerheid", attempt.analysis.uncertainty],
+              ] as const
+            ).map(([title, value]) => (
+              <section key={title}>
+                <h3>{title}</h3>
+                <p className="muted text-sm mt-2">{value}</p>
+              </section>
+            ))}
+            {(
+              [
+                [
+                  "Indexadvies · alleen review, nooit uitgevoerd",
+                  attempt.analysis.index_recommendations,
+                ],
+                [
+                  "Correctheidsrisico’s en aannames",
+                  attempt.analysis.correctness_risks,
+                ],
+                ["Te valideren", attempt.analysis.validation_recommendations],
+                ["Ontbrekende context", attempt.analysis.missing_context],
+              ] as const
+            ).map(([title, values]) => (
+              <section key={title}>
+                <h3>{title}</h3>
+                {values.length ? (
+                  <ul className="list-disc pl-4 text-sm muted mt-2">
+                    {values.map((value, i) => (
+                      <li key={i}>{value}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted text-xs mt-2">
+                    Geen punten door het model opgegeven; dit is geen bewijs dat
+                    er geen risico’s zijn.
+                  </p>
+                )}
+              </section>
+            ))}
+            <p className="notice notice-amber">
+              {(
+                {
+                  awaiting_validation:
+                    "AI-voorstel gegenereerd · wacht op validatie",
+                  validation_unavailable:
+                    "AI-voorstel gegenereerd · validatie niet beschikbaar",
+                  validated_improvement:
+                    "Gemeten verbetering binnen de geteste voorwaarden",
+                  correctness_failed: "Correctheid afgewezen",
+                  performance_regression: "Gemeten performanceregressie",
+                  not_faster: "Geen gemeten verbetering",
+                  validation_error: "Technische validatiefout",
+                  inconclusive: "Validatie onbeslist",
+                  no_rewrite_proposed:
+                    "Geen SQL-kandidaat; indexadvies blijft beschikbaar",
+                  rewrite_static_rejected:
+                    "SQL-voorstel afgewezen door statische controle",
+                  rewrite_parsing_failed:
+                    "SQL-rewrite kon niet worden verwerkt",
+                } as Record<string, string>
+              )[attempt.validation_state ?? ""] ??
+                "Voorstel vereist onafhankelijke review."}
+            </p>
+          </div>
+        </Card>
+      )}
       <div className="grid-two">
         <CorrectnessComparison attempt={attempt} />
         <PerformanceComparison attempt={attempt} />
@@ -196,8 +283,16 @@ export function AttemptPanels({ attempt }: { attempt: Attempt }) {
               </dd>
             </div>
             <div>
+              <dt>Provider</dt>
+              <dd>{attempt.provider ?? "Historisch / niet vastgelegd"}</dd>
+            </div>
+            <div>
               <dt>API-kosten</dt>
-              <dd>Niet betrouwbaar vastgelegd</dd>
+              <dd>
+                {attempt.cost_usd == null
+                  ? "Niet betrouwbaar vastgelegd"
+                  : `$${attempt.cost_usd.toFixed(6)} USD · ${attempt.cost_kind === "reported" ? "door provider gerapporteerd" : "geschat"}`}
+              </dd>
             </div>
           </dl>
           {attempt.explanation ? (

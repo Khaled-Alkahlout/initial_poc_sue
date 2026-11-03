@@ -30,6 +30,8 @@ export const sourceLabels: Record<string, string> = {
   mock: "Offline mock",
   live_mock: "Testdatabase · mock",
   live: "Live POC",
+  analysis: "AI-analyse · ongetest",
+  validate: "Voorstelvalidatie",
   synthetic: "Gesimuleerd",
   current: "Nieuwe uitvoering",
   measured: "Testmeting",

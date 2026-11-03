@@ -30,6 +30,8 @@ class Store:
                     id TEXT PRIMARY KEY, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
                     label TEXT NOT NULL, comment TEXT NOT NULL, reviewer TEXT NOT NULL,
                     created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY, value TEXT NOT NULL);
             """)
 
     @contextmanager
@@ -42,9 +44,56 @@ class Store:
         finally:
             conn.close()
 
+    def generation_settings(self):
+        from llm.generation import GenerationSettings, environment_defaults
+
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='generation'"
+            ).fetchone()
+        return (
+            GenerationSettings.model_validate_json(row["value"])
+            if row
+            else environment_defaults()
+        )
+
+    def save_generation_settings(self, settings):
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO settings(key,value) VALUES('generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (settings.model_dump_json(),),
+            )
+
+    def reset_generation_settings(self):
+        with self.connection() as conn:
+            conn.execute("DELETE FROM settings WHERE key='generation'")
+
+    def record_rewrite_display(self, job_id: str, displayed: bool):
+        # Atomic metadata-only acknowledgement; preserve status and completion time.
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE jobs SET result=json_set(result, '$.attempts[0].diagnostics.frontend_sql_displayed', json(?)) WHERE id=?",
+                (json.dumps(displayed), job_id),
+            )
+
     def create_job(self, kind: str, config: dict) -> dict:
         job_id = str(uuid4())
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if kind == "run" and config.get("mode") in {"analysis", "validate"}:
+                active = conn.execute(
+                    "SELECT config FROM jobs WHERE kind='run' AND status IN ('PENDING','RUNNING')"
+                ).fetchall()
+                if any(
+                    json.loads(row["config"]).get("query_id") == config.get("query_id")
+                    and json.loads(row["config"]).get("mode") == config.get("mode")
+                    for row in active
+                ):
+                    from api.services.jobs import BusyError
+
+                    raise BusyError(
+                        "Er loopt al eenzelfde taak voor deze query. Open de analysehistorie; dubbele aanvraag voorkomen."
+                    )
             conn.execute(
                 "INSERT INTO jobs(id,kind,config,status,created_at) VALUES(?,?,?,?,?)",
                 (job_id, kind, json.dumps(config), "PENDING", now()),
@@ -108,6 +157,25 @@ class Store:
                     job_id,
                 ),
             )
+            if result is not None:
+                # Verify the serialized SQL after the database write, in the same transaction.
+                saved = json.loads(
+                    conn.execute(
+                        "SELECT result FROM jobs WHERE id=?", (job_id,)
+                    ).fetchone()[0]
+                )
+                for attempt in saved.get("attempts", []):
+                    diagnostic = attempt.get("diagnostics", {})
+                    if diagnostic.get("rewrite_requested"):
+                        sql = attempt.get("proposed_sql")
+                        expected = (attempt.get("analysis") or {}).get("optimized_sql")
+                        diagnostic["sql_stored_success"] = (
+                            sql == expected if sql else None
+                        )
+                conn.execute(
+                    "UPDATE jobs SET result=? WHERE id=?",
+                    (json.dumps(saved, allow_nan=False), job_id),
+                )
 
     def recover_interrupted(self) -> None:
         with self.connection() as conn:

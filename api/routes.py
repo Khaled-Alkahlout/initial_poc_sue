@@ -18,10 +18,16 @@ from api.schemas import (
     TestExecution,
     TestRecord,
     TestRequest,
+    AIConnectionTest,
+    RewriteDisplay,
 )
 from api.services.artifacts import CASE_MAP
 from api.services.jobs import BusyError
 from api.services.privacy import redact
+from llm.generation import GenerationSettings
+from api.services import ai_settings
+from llm.analysis import AnalysisError
+from api.services.errors import model_http_error
 
 router = APIRouter(prefix="/api")
 
@@ -71,6 +77,15 @@ def run(run_id: str, request: Request):
 @router.post("/runs", response_model=RunDetail, status_code=202)
 def start_run(value: RunRequest, request: Request):
     catalog = request.app.state.catalog
+    if value.rewrite_only:
+        from api.services.analysis import rewrite_source
+
+        if value.mode != "analysis":
+            raise HTTPException(422, "Gerichte rewrite vereist analysis-modus.")
+        try:
+            rewrite_source(request.app.state.store, value.source_id, value.query_id)
+        except AnalysisError as exc:
+            raise HTTPException(422, str(exc)) from None
     if value.query_id not in CASE_MAP:
         raise HTTPException(422, "Alleen bestaande querycases zijn toegestaan.")
     capability = next(
@@ -97,8 +112,33 @@ def start_run(value: RunRequest, request: Request):
         is None
     ):
         raise HTTPException(422, "Geen opgeslagen replay voor deze combinatie.")
-    job = enqueue(request, "run", value.model_dump())
+    if value.mode == "validate":
+        from api.services.analysis import saved_proposal
+
+        try:
+            saved_proposal(request.app.state.store, value.source_id, value.query_id)
+        except AnalysisError as exc:
+            raise HTTPException(422, str(exc)) from None
+    config = value.model_dump()
+    if value.mode == "analysis":
+        config["generation_settings"] = (
+            request.app.state.store.generation_settings().model_dump()
+        )
+    job = enqueue(request, "run", config)
     return catalog.job_run(job)
+
+
+@router.post("/runs/{run_id}/rewrite-display", status_code=204)
+def rewrite_display(run_id: str, value: RewriteDisplay, request: Request):
+    store = request.app.state.store
+    job = require(store.job(run_id))
+    result = job.get("result")
+    if not result or not result.get("attempts"):
+        raise HTTPException(422, "Geen opgeslagen voorstel beschikbaar.")
+    attempt = result["attempts"][0]
+    if value.sql_displayed and not attempt.get("proposed_sql"):
+        raise HTTPException(422, "Er is geen opgeslagen SQL om weer te geven.")
+    store.record_rewrite_display(run_id, value.sql_displayed)
 
 
 @router.get("/development/tests", response_model=TestCollection)
@@ -174,3 +214,62 @@ def add_feedback(value: FeedbackInput, request: Request):
 @router.get("/system/status", response_model=SystemStatus)
 def system_status(request: Request):
     return request.app.state.catalog.system()
+
+
+@router.post("/system/check-model")
+def check_model():
+    from llm.analysis import AnalysisError, check_connection
+
+    try:
+        return check_connection()
+    except AnalysisError as exc:
+        raise model_http_error(exc) from None
+
+
+@router.get("/settings/ai")
+def get_ai_settings(request: Request):
+    try:
+        return ai_settings.settings_view(
+            request.app.state.store, request.app.state.catalog.settings
+        )
+    except AnalysisError as exc:
+        raise model_http_error(exc) from None
+
+
+@router.put("/settings/ai", response_model=GenerationSettings)
+def put_ai_settings(value: GenerationSettings, request: Request):
+    try:
+        ai_settings.save_settings(request.app.state.store, value)
+        return value
+    except AnalysisError as exc:
+        raise model_http_error(exc) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@router.post("/settings/ai/reset", response_model=GenerationSettings)
+def reset_ai_settings(request: Request):
+    try:
+        value = ai_settings.environment_defaults()
+        ai_settings.validate_capabilities(value, ai_settings.model_capabilities())
+        request.app.state.store.reset_generation_settings()
+        return value
+    except AnalysisError as exc:
+        raise model_http_error(exc) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@router.post("/settings/ai/test")
+def test_ai_generation(value: AIConnectionTest, request: Request):
+    try:
+        result = ai_settings.test_generation(request.app.state.catalog.settings)
+        if not result["success"] and result.get("diagnostics", {}).get(
+            "error_code"
+        ) in {"network_or_timeout", "provider_error"}:
+            raise model_http_error(
+                AnalysisError(result["message"], result["diagnostics"])
+            )
+        return result
+    except AnalysisError as exc:
+        raise model_http_error(exc, default=409) from None

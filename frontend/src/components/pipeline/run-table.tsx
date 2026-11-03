@@ -52,6 +52,8 @@ export function RunTable({
             onChange={(e) => setMode(e.target.value)}
           >
             <option value="all">Alle runtypen</option>
+            <option value="analysis">AI-analyse · ongetest</option>
+            <option value="validate">Voorstelvalidatie</option>
             <option value="historical">Historisch</option>
             <option value="replay">Replay</option>
             <option value="mock">Offline mock</option>

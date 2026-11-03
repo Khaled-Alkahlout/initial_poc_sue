@@ -78,13 +78,50 @@ describe("review en navigatie", () => {
     await user.click(screen.getByLabelText("Wissel licht en donker thema"));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
+  test("geconfigureerd echt model is de standaard POC zonder SQL-uitvoering", async () => {
+    const user = userEvent.setup();
+    const config = system();
+    config.run_modes.push({
+      id: "analysis",
+      label: "Live POC · echt AI-advies",
+      available: true,
+      reason: "Geen database nodig",
+      executes_sql: false,
+      external_model: true,
+    });
+    const start = vi
+      .spyOn(api, "startRun")
+      .mockResolvedValue({ ...run(), mode: "analysis" });
+    render(<StartRun queries={[query()]} system={config} />);
+    await user.click(screen.getByRole("button", { name: "POC starten" }));
+    expect(screen.getByRole("combobox", { name: "Uitvoermodus" })).toHaveValue(
+      "analysis",
+    );
+    expect(
+      screen.getByRole("button", { name: "Echte AI-analyse starten" }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(
+      screen.getByRole("button", { name: "Echte AI-analyse starten" }),
+    );
+    await waitFor(() =>
+      expect(start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "analysis",
+          condition: "C4_stats",
+          confirm_sql: false,
+          confirm_external_model: true,
+        }),
+      ),
+    );
+  });
   test("demo start expliciet als replay en navigeert naar de nieuwe run", async () => {
     const user = userEvent.setup();
     const start = vi
       .spyOn(api, "startRun")
       .mockResolvedValue({ ...run(), mode: "replay" });
     render(<StartRun queries={[query()]} system={system()} />);
-    await user.click(screen.getByRole("button", { name: "Demo starten" }));
+    await user.click(screen.getByRole("button", { name: "POC starten" }));
     expect(screen.getByRole("option", { name: /Live POC/ })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Replay starten" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/test-run"));

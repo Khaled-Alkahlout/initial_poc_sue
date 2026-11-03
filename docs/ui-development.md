@@ -61,7 +61,7 @@ npm start
 2. Open **Query Explorer**: sorteer, zoek, wijzig het weergavebudget en bekijk
    de redencodes bij een query. Workloadcijfers zijn expliciet fictief.
 3. Open `top_products`: SQL, metrics, selectie en opgeslagen context.
-4. Klik **Demo starten**, kies **Historische replay** en een contextconditie.
+4. Klik **POC starten**, kies **Historische replay** en een contextconditie.
 5. De nieuwe run gaat van wachtrij naar voltooid. Inspecteer SQL naast elkaar,
    fases en historische benchmark. Er wordt niets opnieuw gemeten.
 6. Sla een ontwikkelaarsreview op. Herladen toont de review nog steeds; de
@@ -88,9 +88,11 @@ uitgevoerd. C1 is de enige beschikbare contextconditie voor deze modus.
 | `SUE_ENABLE_LLM=1`              | Externe modelgeneratie expliciet aanbieden                      |
 | `SUE_MODEL`                     | Expliciet gekozen provider-model-ID                             |
 | `ANTHROPIC_API_KEY`             | Alleen server-side modelcredential                              |
+| `OPENROUTER_API_KEY`            | Server-side OpenRouter-key voor nieuwe analyses                 |
+| `SUE_LLM_PROVIDER`              | `openrouter` of expliciet `anthropic` voor legacy-direct        |
 
-De Python-API leest procesvariabelen; `.env.example` wordt niet automatisch
-geladen. Gebruik bijvoorbeeld `$env:SUE_ENABLE_SQL_RUNS="1"` vóór Uvicorn.
+De Python-API laadt `.env` uit de repositoryhoofdmap; procesvariabelen hebben
+voorrang. `.env.example` is alleen een template. Zie [OpenRouter instellen](openrouter.md).
 Next.js kan `frontend/.env.local` gebruiken voor `API_ORIGIN`.
 Gebruik geen `NEXT_PUBLIC_*`-variabelen voor credentials. De voorbeeldbestanden
 bevatten geen werkende credentials; echte `.env`-bestanden worden genegeerd.
@@ -159,6 +161,12 @@ API- en browsertests zijn daarom buiten die sandbox uitgevoerd. Voor tijdelijke
 testbestanden werd een map binnen de lokale `.venv` gebruikt.
 
 ## Problemen oplossen
+
+`npm run dev` gebruikt expliciet Webpack, net als de productiebuild. In de
+lokale Windows/OneDrive-omgeving veroorzaakte de Turbopack-devserver een
+voortdurende Fast Refresh/herlaadlus, ook zonder bronwijzigingen. Herstart na
+deze scriptwijziging één keer de frontend. Start niet meerdere devservers voor
+dezelfde buildmap. De Python-API hoeft hiervoor niet opnieuw te starten.
 
 | Symptoom                        | Controle                                                                                          |
 | ------------------------------- | ------------------------------------------------------------------------------------------------- |

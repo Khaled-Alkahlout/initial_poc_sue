@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from api.config import Settings
 from api.services.privacy import redact
 from api.services.storage import Store
+from api.services.runtime import LOADED_REVISION, ensure_current
 
 
 class BusyError(Exception):
@@ -27,12 +28,15 @@ class JobManager:
         self.closing = False
 
     def start(self, kind: str, config: dict) -> dict:
+        ensure_current()
         if self.closing or not self.slots.acquire(blocking=False):
             raise BusyError(
                 "Er loopt al een taak en er staat er één in de wachtrij. Probeer later opnieuw."
             )
         try:
-            job = self.store.create_job(kind, config)
+            job = self.store.create_job(
+                kind, {**config, "runtime_revision": LOADED_REVISION}
+            )
             self.pool.submit(self._execute, job["id"])
             return job
         except Exception:
