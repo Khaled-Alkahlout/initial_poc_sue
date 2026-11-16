@@ -1,29 +1,26 @@
 import Link from "next/link";
 import {
+  Activity,
   ArrowRight,
   ArrowUpRight,
   CheckCheck,
   Database,
   Filter,
-  FlaskConical,
-  GitBranch,
-  Info,
-  Layers,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import type { Overview, SystemStatus } from "@/lib/api/contracts";
 import { count } from "@/lib/formatters";
-import { Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card, CardHeader } from "@/components/ui/card";
 import { SourceBadge } from "@/components/shared/status";
-import { PageHeader } from "@/components/shared/page-header";
+import { TechnicalDetails } from "@/components/shared/technical-details";
 import { PipelineVisualizer } from "@/components/pipeline/pipeline-visualizer";
 import { RunTable } from "@/components/pipeline/run-table";
 import { ImpactChart } from "@/components/charts/impact-chart";
 import { StartRun } from "@/features/runs/start-run";
 import { PriorityTable } from "@/components/queries/priority-table";
 
-const icons = [Database, Filter, CheckCheck, Sparkles];
 export function OverviewDashboard({
   data,
   system,
@@ -31,143 +28,146 @@ export function OverviewDashboard({
   data: Overview;
   system: SystemStatus;
 }) {
+  const metrics = new Map(data.metrics.map((metric) => [metric.id, metric]));
+  const highlights = [
+    {
+      label: "Querypatronen",
+      value: metrics.get("queries")?.value,
+      note: "Beschikbaar voor inspectie",
+      icon: Database,
+    },
+    {
+      label: "Geselecteerd",
+      value: metrics.get("selected")?.value,
+      note: "Op basis van demo-workload",
+      icon: Filter,
+    },
+    {
+      label: "Query’s met AI-analyse",
+      value: data.queries.filter((query) => query.analyzed).length,
+      note: "Met opgeslagen modelpogingen",
+      icon: Sparkles,
+    },
+    {
+      label: "Geaccepteerde voorstellen",
+      value: metrics.get("accepted")?.value,
+      note: "Geaccepteerde historische pogingen",
+      icon: CheckCheck,
+    },
+  ];
+  const analysis = system.run_modes.find((mode) => mode.id === "analysis");
+  const validation = system.run_modes.find((mode) => mode.id === "validate");
   return (
-    <div className="stack">
-      <PageHeader
-        eyebrow="POC / DATABASEOPTIMALISATIE"
-        title="Overzicht"
-        description="Van SQL-query naar een onderbouwd optimalisatievoorstel. Eén genererende agent, gevolgd door onafhankelijke softwarecontroles."
-        action={<StartRun queries={data.queries} system={system} />}
-      />
-      <div className="metric-grid">
-        {data.metrics.slice(0, 4).map((metric, index) => {
-          const Icon = icons[index];
-          return (
-            <Card className="metric" key={metric.id}>
-              <div className="metric-label">
-                <span>{metric.label}</span>
-                <Icon size={15} />
-              </div>
-              <div className="metric-value">{count(metric.value)}</div>
-              <p className="metric-note">{metric.note}</p>
-              <div className="metric-meta">
-                <SourceBadge source={metric.origin} />
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-      <div className="summary-strip">
-        {data.metrics.slice(4).map((metric) => (
-          <span key={metric.id}>
-            <strong>{count(metric.value)}</strong> {metric.label.toLowerCase()}{" "}
-            <span>· {metric.note}</span>
-          </span>
+    <div className="stack dashboard">
+      <section className="overview-hero" aria-labelledby="overview-title">
+        <div>
+          <h1 id="overview-title">Overzicht</h1>
+          <p>
+            Inspecteer SQL, vergelijk AI-voorstellen en bekijk de resultaten van
+            de validator.
+          </p>
+          <div className="page-actions">
+            <Button asChild>
+              <Link href="/queries">
+                Query Explorer <ArrowRight size={16} />
+              </Link>
+            </Button>
+            <StartRun queries={data.queries} system={system} />
+          </div>
+        </div>
+        <div className="overview-system">
+          <h2>
+            <Activity size={16} /> Lokale omgeving
+          </h2>
+          <dl>
+            <div>
+              <dt>AI-analyse</dt>
+              <dd>
+                <span data-available={analysis?.available === true} />
+                {analysis?.available ? "Beschikbaar" : "Niet beschikbaar"}
+              </dd>
+            </div>
+            <div>
+              <dt>
+                <ShieldCheck size={13} /> Testdatabasevalidatie
+              </dt>
+              <dd>
+                <span data-available={validation?.available === true} />
+                {validation?.available ? "Beschikbaar" : "Niet beschikbaar"}
+              </dd>
+            </div>
+          </dl>
+          <Link href="/development/architecture">
+            Systeemstatus <ArrowUpRight size={13} />
+          </Link>
+        </div>
+      </section>
+
+      <div className="metric-grid" aria-label="Samenvatting">
+        {highlights.map(({ label, value, note, icon: Icon }) => (
+          <Card className="metric" key={label}>
+            <div className="metric-label">
+              <span>{label}</span>
+              <span className="section-icon">
+                <Icon size={18} />
+              </span>
+            </div>
+            <div className="metric-value">{count(value)}</div>
+            <p className="metric-note">
+              {value == null ? "Niet beschikbaar" : note}
+            </p>
+          </Card>
         ))}
       </div>
+
       <Card>
         <CardHeader
-          title="De optimalisatiepipeline"
-          description="Elke fase heeft een eigen verantwoordelijkheid. Schematische weergave; geen actuele uitvoerstatus."
-          action={
-            <Link className="text-link" href="/development/architecture">
-              Architectuur <ArrowUpRight size={13} />
-            </Link>
-          }
+          title="Optimalisatiepipeline"
+          description="Fasen die het systeem ondersteunt. Open een run voor de geregistreerde status."
         />
         <PipelineVisualizer />
       </Card>
-      <div className="grid-aside">
-        <Card>
-          <CardHeader
-            title="Welke query heeft de meeste impact?"
-            description="Gerangschikt op totale uitvoeringstijd, niet alleen op latency."
-            action={<SourceBadge source="synthetic" />}
-          />
-          <div className="panel-body !pb-0 !pl-1">
-            <ImpactChart queries={data.queries} />
-          </div>
-          <p className="chart-footnote">
-            Fictieve workloadgegevens. Een snelle query die vaak draait kan meer
-            belasting veroorzaken dan één trage uitvoering.
-          </p>
-          <div className="table-footer">
-            <span>
-              {data.queries.length} querypatronen · deterministische ranking
-            </span>
-            <Link href="/queries" className="text-link">
-              Query Explorer <ArrowRight size={13} />
-            </Link>
-          </div>
-        </Card>
-        <Card>
-          <CardHeader
-            title="Wat onderzoeken we?"
-            description="Een kleine, controleerbare POC."
-          />
-          <div className="panel-body">
-            <ul className="explanation-list">
-              <li>
-                <Layers size={17} />
-                <div>
-                  <strong>Context vóór het voorstel</strong>
-                  <p>
-                    SQL, schema, indexinformatie en beschikbare execution plans
-                    helpen de analyse.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <CheckCheck size={17} />
-                <div>
-                  <strong>Vertrouwen door controle</strong>
-                  <p>
-                    Een modelclaim is geen bewijs. Correctheid en performance
-                    worden apart beoordeeld.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <FlaskConical size={17} />
-                <div>
-                  <strong>Transparante evaluatie</strong>
-                  <p>
-                    Inspecteer afwijzingen, beperkingen en ontwikkelaarsreviews
-                    in Development.
-                  </p>
-                </div>
-              </li>
-            </ul>
-            <Button className="mt-6 w-full" variant="outline" asChild>
-              <Link href="/development">
-                Open Development <ArrowUpRight size={13} />
-              </Link>
-            </Button>
-          </div>
-        </Card>
-      </div>
+      <PriorityTable queries={data.queries} />
       <Card>
         <CardHeader
-          title="Recente pipeline-runs"
-          description="Historische experimenten, replays en nieuwe uitvoeringen blijven herkenbaar gescheiden."
+          title="Recente analyses en tests"
           action={
             <Link className="text-link" href="/runs">
-              Alle runs <GitBranch size={13} />
+              Alle runs <ArrowRight size={14} />
             </Link>
           }
         />
         <RunTable runs={data.recent_runs} />
       </Card>
-      <PriorityTable queries={data.queries} />
-      <div className="notice">
-        <Info size={15} />
-        <p>
-          <strong>Zo lees je dit dashboard.</strong> Workloadcijfers zijn
-          gesimuleerd; experimentele benchmarks zijn historische testmetingen.
-          Een geaccepteerd voorstel geldt uitsluitend binnen de geteste
-          voorwaarden.
-        </p>
-      </div>
+      <TechnicalDetails
+        title="Workload- en onderzoeksgegevens"
+        description="Totale impact en historische modelactiviteit"
+      >
+        <Card>
+          <CardHeader
+            title="Gesimuleerde workloadimpact"
+            action={<SourceBadge source="synthetic" />}
+          />
+          <div className="panel-body">
+            <ImpactChart queries={data.queries} />
+          </div>
+        </Card>
+        <div className="dashboard-research">
+          {data.metrics
+            .filter(
+              (metric) =>
+                !["queries", "selected", "accepted"].includes(metric.id),
+            )
+            .map((metric) => (
+              <div key={metric.id}>
+                <strong>
+                  {count(metric.value)} · {metric.label}
+                </strong>
+                <p className="muted">{metric.note}</p>
+              </div>
+            ))}
+        </div>
+      </TechnicalDetails>
     </div>
   );
 }

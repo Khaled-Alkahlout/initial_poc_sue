@@ -141,6 +141,7 @@ class QueryView(BaseModel):
     related_run_ids: list[str]
     analysis_count: int
     latest_outcome: Outcome | None = None
+    has_proposal: bool | None = None
 
 
 class QueryCollection(BaseModel):

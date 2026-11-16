@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { ArrowUpRight, Sparkles } from "lucide-react";
 import { api, errorMessage } from "@/lib/api/client";
 import type { QueryDetail, Run, SystemStatus } from "@/lib/api/contracts";
+import { compareBenchmark } from "@/lib/benchmark";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { ErrorState } from "@/components/shared/states";
+import { SqlViewer } from "@/components/queries/sql-viewer";
 import { RunDetail } from "@/features/runs/run-detail";
 
 export function AnalysisWorkspace({
@@ -19,11 +22,42 @@ export function AnalysisWorkspace({
   const [run, setRun] = useState<Run | null>(null);
   const [busy, setBusy] = useState(false);
   const [consent, setConsent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const capability = system.run_modes.find((m) => m.id === "analysis");
-  const previousRunId = query.attempts.find(
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const capability = system.run_modes.find((mode) => mode.id === "analysis");
+  const storedAnalysisId = query.runs.find(
+    (item) => item.mode === "analysis",
+  )?.id;
+  const previous = query.attempts.find(
     (attempt) => attempt.analysis || attempt.diagnostics?.error_code,
-  )?.run_id;
+  );
+  const experiment =
+    query.attempts.find(
+      (attempt) =>
+        attempt.origin === "historical" &&
+        !!compareBenchmark(attempt)?.validated,
+    ) ??
+    query.attempts.find(
+      (attempt) => attempt.origin === "historical" && !!attempt.proposed_sql,
+    );
+  const previousRunId =
+    storedAnalysisId ?? previous?.run_id ?? experiment?.run_id;
+  const validationId =
+    run?.mode === "analysis"
+      ? query.runs.find(
+          (item) =>
+            item.mode === "validate" &&
+            item.source_id === run.id &&
+            item.lifecycle === "COMPLETED",
+        )?.id
+      : undefined;
+  const validation = validationId
+    ? query.attempts.find((attempt) => attempt.run_id === validationId)
+    : undefined;
+  const pending = run?.lifecycle === "PENDING" || run?.lifecycle === "RUNNING";
+  const latestAttempt = run?.attempts[0];
+
   useEffect(() => {
     if (!previousRunId) return;
     let disposed = false;
@@ -33,16 +67,17 @@ export function AnalysisWorkspace({
         if (!disposed) setRun((current) => current ?? value);
       })
       .catch((reason) => {
-        if (!disposed) setError(errorMessage(reason));
+        if (!disposed) setLoadError(errorMessage(reason));
       });
     return () => {
       disposed = true;
     };
-  }, [previousRunId]);
+  }, [previousRunId, reload]);
+
   async function start(rewriteOnly = false) {
-    if (busy) return;
+    if (busy || pending || !consent || !capability?.available) return;
     setBusy(true);
-    setError(null);
+    setRequestError(null);
     try {
       setRun(
         await api.startRun({
@@ -55,106 +90,119 @@ export function AnalysisWorkspace({
         }),
       );
     } catch (reason) {
-      setError(errorMessage(reason));
+      setRequestError(errorMessage(reason));
     } finally {
       setBusy(false);
     }
   }
+  const canRewrite = run?.mode === "analysis" && !pending;
   return (
     <section className="stack" aria-label="AI Analysis Workspace">
-      <Card>
+      <Card className="analysis-controls">
         <CardHeader
           title="Analyze with AI"
-          description="Van originele query naar een verklaarbaar advies. Generatie voert geen SQL uit en bewijst geen correctheid."
+          description="Genereer advies op basis van de query en beschikbare geredigeerde context."
+          action={
+            system.configured_model && (
+              <span className="model-pill mono">{system.configured_model}</span>
+            )
+          }
         />
-        <div className="panel-body stack">
-          <p className="text-xs muted">
-            {system.provider ?? "Provider"} ·{" "}
-            <span className="mono">
-              {system.configured_model ?? "Geen model ingesteld"}
-            </span>
-            . Beschikbare context is historisch en kan verouderd zijn.
-            Ontbrekende informatie wordt als beperking meegestuurd.
-          </p>
-          <label className="check-field">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-            />
-            <span>
-              Ik bevestig één extern AI-request met geredigeerde fixturecontext
-              en mogelijke kosten.
-            </span>
-          </label>
-          <Button
-            onClick={() => start()}
-            disabled={
-              busy ||
-              !consent ||
-              !capability?.available ||
-              (!!run && ["PENDING", "RUNNING"].includes(run.lifecycle))
-            }
-          >
-            {busy ? "Analyse starten…" : "Analyze with AI"}
-          </Button>
-          {!capability?.available && (
-            <p className="notice notice-amber">
-              {system.configuration_error ??
-                capability?.reason ??
-                "OpenRouter nog niet geconfigureerd."}{" "}
-              <Link className="text-link" href="/development/architecture">
-                Systeemstatus
-              </Link>
-            </p>
-          )}
-          {capability?.available && (
-            <p className="notice notice-blue">
-              Klaar voor echte AI-analyse via {system.provider}. De knop stuurt
-              één verzoek naar het ingestelde model. Er wordt geen SQL
-              uitgevoerd; correctheid en performance blijven ongetest.
-            </p>
-          )}
-          {error && <ErrorState message={error} />}
-          {query.attempts
-            .filter((a) => a.analysis)
-            .slice(0, 1)
-            .map((a) => (
-              <Link key={a.id} className="text-link" href={`/runs/${a.run_id}`}>
-                Vorige AI-analyse openen →
-              </Link>
-            ))}
-        </div>
-      </Card>
-      {run && (
-        <RunDetail
-          key={run.id}
-          initial={run}
-          onUpdate={setRun}
-          rewriteAction={
-            ["COMPLETED", "FAILED"].includes(run.lifecycle) ? (
-              <Card>
-                <CardHeader
-                  title="Generate SQL Rewrite"
-                  description="Vraag één alternatief voorstel aan met dezelfde context en bekende bottlenecks. Een voorstel is een ongeteste hypothese."
+        <div className="panel-body">
+          {capability?.available ? (
+            <>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(event) => setConsent(event.target.checked)}
                 />
-                <div className="panel-body stack">
+                <span>
+                  Ik bevestig één extern AI-request met geredigeerde context en
+                  mogelijke kosten. SQL-validatie is een aparte stap.
+                </span>
+              </label>
+              <div className="page-actions">
+                <Button
+                  onClick={() => start()}
+                  disabled={busy || pending || !consent}
+                >
+                  <Sparkles size={16} />{" "}
+                  {busy ? "Analyse starten…" : "Analyze with AI"}
+                </Button>
+                {canRewrite && (
                   <Button
+                    variant="outline"
                     onClick={() => start(true)}
-                    disabled={busy || !consent || !capability?.available}
+                    disabled={busy || !consent}
                   >
                     Generate SQL Rewrite
                   </Button>
-                  <p className="muted text-xs">
-                    Gebruik de bevestiging hierboven voor één extern
-                    modelrequest. Elke aanvraag blijft apart in de
-                    analysehistorie bewaard.
-                  </p>
-                </div>
-              </Card>
-            ) : null
-          }
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="analysis-unavailable">
+              <Button disabled>
+                <Sparkles size={16} /> Analyze with AI
+              </Button>
+              <p className="muted text-sm">
+                {system.configuration_error ??
+                  capability?.reason ??
+                  "OpenRouter nog niet geconfigureerd."}{" "}
+                <Link className="text-link" href="/settings">
+                  AI Settings <ArrowUpRight size={12} />
+                </Link>
+              </p>
+            </div>
+          )}
+          {requestError && (
+            <p className="notice notice-error" role="alert">
+              {requestError}
+            </p>
+          )}
+          {run?.mode === "analysis" && latestAttempt && (
+            <Link className="text-link" href={"/runs/" + run.id}>
+              Open deze analyse <ArrowUpRight size={12} />
+            </Link>
+          )}
+        </div>
+      </Card>
+      {!run && loadError && (
+        <ErrorState
+          message={loadError}
+          retry={() => {
+            setLoadError(null);
+            setReload((value) => value + 1);
+          }}
         />
+      )}
+      {run ? (
+        <RunDetail
+          key={run.id}
+          initial={run}
+          initialAttemptId={
+            run.id === experiment?.run_id ? experiment.id : undefined
+          }
+          onUpdate={setRun}
+          inline
+          system={system}
+          baselineSql={query.sql}
+          validation={validation}
+        />
+      ) : (
+        <>
+          {previousRunId && !loadError && (
+            <p className="run-live-status" role="status">
+              Opgeslagen analyse laden…
+            </p>
+          )}
+          <SqlViewer
+            sql={query.sql}
+            title="Original SQL Query"
+            label="SQL-fixture"
+          />
+        </>
       )}
     </section>
   );

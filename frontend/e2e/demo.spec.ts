@@ -43,22 +43,24 @@ test("POC demo: query inspecteren, replay starten en review bewaren", async ({
     page.getByText("Historische replay.", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Gelijk, niet sneller", { exact: true }).first(),
+    page.getByRole("region", { name: "Optimization Results" }),
   ).toBeVisible();
+  await page.getByText("Technical Details", { exact: true }).click();
   await page.getByLabel("Reviewlabel").selectOption("incorrect");
   await page
     .getByLabel("Toelichting · optioneel")
     .fill("E2E review: controleer de semantische aannames.");
   await page.getByRole("button", { name: "Review opslaan" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "technische uitslag blijft ongewijzigd",
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Review opgeslagen" }),
+  ).toContainText("technische uitslag blijft ongewijzigd");
   await page.reload();
+  await page.getByText("Technical Details", { exact: true }).click();
   await expect(
     page.getByText("E2E review: controleer de semantische aannames."),
   ).toBeVisible();
   await expect(
-    page.getByText("Gelijk, niet sneller", { exact: true }).first(),
+    page.getByRole("region", { name: "Optimization Results" }),
   ).toBeVisible();
 });
 
@@ -144,4 +146,17 @@ test("AI-workspace toont configuratie en vraagt expliciete bevestiging", async (
   await expect(
     page.getByRole("button", { name: "Analyze with AI", exact: true }),
   ).toBeDisabled();
+  const system = await (await page.request.get("/api/system/status")).json();
+  if (
+    system.run_modes.some(
+      (mode: { id: string; available: boolean }) =>
+        mode.id === "analysis" && mode.available,
+    )
+  ) {
+    await expect(
+      page
+        .getByRole("region", { name: "AI Analysis Workspace" })
+        .getByRole("checkbox"),
+    ).not.toBeChecked();
+  }
 });

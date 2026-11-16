@@ -191,6 +191,7 @@ export const querySchema = z.object({
   related_run_ids: z.array(z.string()),
   analysis_count: z.number(),
   latest_outcome: outcome.nullable(),
+  has_proposal: z.boolean().nullable().optional(),
 });
 export const queriesSchema = z.object({
   queries: z.array(querySchema),

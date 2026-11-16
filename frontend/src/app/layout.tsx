@@ -3,7 +3,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "SUE INNO · Query Lab", template: "%s · SUE INNO" },
+  title: { default: "AI Database Optimization · SUE", template: "%s · SUE" },
+  icons: { icon: "/sue-logo.svg" },
   description:
     "Onderzoeksdashboard voor single-agent SQL-optimalisatie, queryselectie en onafhankelijke evaluatie.",
 };

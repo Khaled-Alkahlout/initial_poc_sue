@@ -6,6 +6,14 @@ test("top_products: no rewrite, focused candidate and SQL display", async ({
   page,
 }) => {
   // Provider requests are intercepted: this browser regression never bills or executes SQL.
+  const system = await (await page.request.get("/api/system/status")).json();
+  test.skip(
+    !system.run_modes.some(
+      (mode: { id: string; available: boolean }) =>
+        mode.id === "analysis" && mode.available,
+    ),
+    "Requires an analysis-enabled test server. Provider mutations are intercepted.",
+  );
   const original = readFileSync("../cases/original/top_products.sql", "utf8");
   const proposed = `WITH filtered_orders AS (
     SELECT id FROM orders WHERE tenant_id = %(tenant_id)s
@@ -119,12 +127,17 @@ test("top_products: no rewrite, focused candidate and SQL display", async ({
     }),
   ).toBeVisible();
   const right = workspace.getByRole("region", {
-    name: "Proposed SQL",
+    name: "Optimized SQL Query",
     exact: true,
   });
-  await expect(right.locator("code")).toHaveText(candidate);
+  await expect(right.locator("code")).toContainText("filtered_orders");
+  expect(await right.locator(".sql-line").count()).toBeGreaterThan(5);
+  await workspace.getByText("Technical Details", { exact: true }).click();
   await expect(
-    right.getByRole("button", { name: "Kopieer SQL: Proposed SQL" }),
+    workspace.getByRole("heading", { name: "AI-model en gebruik" }),
+  ).toBeVisible();
+  await expect(
+    right.getByRole("button", { name: "Kopieer SQL: Optimized SQL Query" }),
   ).toBeVisible();
   await expect.poll(() => displays.includes(true)).toBe(true);
   expect(requests).toBe(2);

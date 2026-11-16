@@ -1,11 +1,13 @@
 "use client";
+
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  ArrowUpRight,
   ChevronRight,
-  CircleDot,
+  FlaskConical,
+  HardDrive,
   Menu,
   Moon,
   Sun,
@@ -21,14 +23,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [dark, setDark] = useState(false);
   const active = navigation
     .flatMap((group) => group.items)
-    .filter((item) =>
-      item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
+    .filter(
+      (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
     )
-    .at(-1);
+    .sort((first, second) => second.href.length - first.href.length)[0];
+
   function toggleTheme() {
     setDark(!dark);
     document.documentElement.dataset.theme = dark ? "light" : "dark";
   }
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -42,13 +46,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
       )}
       <aside className={cn("sidebar", open && "sidebar-open")}>
-        <Link href="/" className="brand" onClick={() => setOpen(false)}>
-          <span className="brand-mark">
-            sue<span>.</span>
-          </span>
-          <span className="brand-meta">
-            INNO<span>QUERY LAB</span>
-          </span>
+        <Link
+          href="/"
+          className="brand"
+          aria-label="SUE · Overzicht"
+          onClick={() => setOpen(false)}
+        >
+          <Image
+            src="/sue-logo.svg"
+            width={88}
+            height={30}
+            alt="SUE"
+            unoptimized
+          />
         </Link>
         <button
           className="mobile-close"
@@ -57,16 +67,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           <X size={20} />
         </button>
-        <div className="workspace">
-          <span className="workspace-icon">
-            <DatabaseMark />
-          </span>
-          <div>
-            <strong>Database optimalisatie</strong>
-            <span>Onderzoeksomgeving</span>
-          </div>
-          <ChevronRight size={14} />
-        </div>
         <nav id="primary-navigation" aria-label="Hoofdnavigatie">
           {navigation.map((group) => (
             <div className="nav-group" key={group.label}>
@@ -81,9 +81,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     className={cn("nav-link", isActive && "nav-active")}
                     onClick={() => setOpen(false)}
                   >
-                    <item.icon size={18} />
+                    <item.icon size={17} />
                     <span>{item.label}</span>
-                    {isActive && <span className="nav-indicator" />}
                   </Link>
                 );
               })}
@@ -91,21 +90,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="research-label">
-            <FlaskMark />
-            <span>Single-agent POC</span>
-          </div>
-          <p>
-            Onderzoeken. Controleren.
-            <br />
-            Onderbouwd verbeteren.
-          </p>
-          <Link href="/development/architecture">
-            Bekijk de systeemgrenzen <ArrowUpRight size={13} />
-          </Link>
-          <div className="sidebar-version">
-            SUE INNO <span>v0.1 · lokaal</span>
-          </div>
+          <span className="sidebar-engine">
+            <HardDrive size={15} /> PostgreSQL
+          </span>
         </div>
       </aside>
       <div className="main-shell">
@@ -122,16 +109,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Menu size={20} />
             </Button>
-            <span className="breadcrumb-root">SUE INNO</span>
-            <ChevronRight size={13} />
-            <span>{active?.label ?? "Inspectie"}</span>
+            <Link href="/" className="breadcrumb-root">
+              AI Database Optimization
+            </Link>
+            <ChevronRight
+              className="breadcrumb-chevron"
+              size={13}
+              aria-hidden="true"
+            />
+            <span className="breadcrumb-page">
+              {active?.label ?? "Inspectie"}
+            </span>
           </div>
           <div className="topbar-right">
-            <span className="environment">
-              <CircleDot size={13} />
-              Lokale POC
+            <span className="poc-label">
+              <FlaskConical size={14} /> Proof of Concept
             </span>
-            <span className="topbar-divider" />
             <Button
               variant="ghost"
               size="icon"
@@ -141,38 +134,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               {dark ? <Sun size={17} /> : <Moon size={17} />}
             </Button>
-            <span className="avatar" aria-label="Lokale onderzoeksomgeving">
-              IN
-            </span>
           </div>
         </header>
         <main id="main" className="main-content">
           {children}
         </main>
-        <footer className="main-footer">
-          <span>SUE INNO · AI-gedreven databaseoptimalisatie</span>
-          <span>Menselijke review blijft de laatste stap.</span>
-        </footer>
       </div>
     </div>
   );
-}
-function DatabaseMark() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <ellipse cx="12" cy="5" rx="8" ry="3" />
-      <path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0" />
-    </svg>
-  );
-}
-function FlaskMark() {
-  return <span className="research-dot" aria-hidden="true" />;
 }

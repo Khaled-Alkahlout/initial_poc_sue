@@ -24,16 +24,11 @@ export function QueryExplorer({
   const { data, error, refresh } = useApi(loader, initial);
   return (
     <div className="stack">
-      <div className="notice notice-amber">
-        Alle workloadcijfers zijn gesimuleerd. Het querybudget wordt door de
-        bestaande Python-module toegepast; tabelsortering verandert de
-        backendrang niet.
-      </div>
       {error && <ErrorState message={error} retry={refresh} />}
       <Card>
         <CardHeader
           title="Queryselectie & impact"
-          description="Bekijk dezelfde beslissingen die vóór contextopbouw en modelcalls worden toegepast."
+          description="De selectielaag past het querybudget toe op gesimuleerde workloadcijfers."
           action={
             <div className="flex items-center gap-3">
               <Badge tone="amber">Mocktelemetrie</Badge>

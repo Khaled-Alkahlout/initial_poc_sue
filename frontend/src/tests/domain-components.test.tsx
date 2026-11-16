@@ -5,10 +5,8 @@ import { QueryTable } from "@/components/queries/query-table";
 import { QueryDecision } from "@/components/queries/query-decision";
 import { SqlComparison } from "@/components/queries/sql-viewer";
 import { PipelineVisualizer } from "@/components/pipeline/pipeline-visualizer";
-import {
-  ContextViewer,
-  PerformanceComparison,
-} from "@/components/evaluation/attempt-panels";
+import { ContextViewer } from "@/components/evaluation/attempt-panels";
+import { PerformanceComparison } from "@/components/evaluation/optimization-results";
 import { TestMatrix } from "@/components/evaluation/test-matrix";
 import { EmptyState, ErrorState } from "@/components/shared/states";
 import { ArchitectureView } from "@/features/development/architecture";
@@ -87,12 +85,15 @@ describe("SQL en fases", () => {
       <SqlComparison original={sql} proposed="SELECT 2" />,
     );
     expect(
-      screen.getByRole("region", { name: "Original SQL" }),
+      screen.getByRole("region", { name: "Original SQL Query" }),
     ).toBeInTheDocument();
     expect(container.querySelector("script")).toBeNull();
-    expect(container.querySelector("pre")?.textContent).toBe(sql);
+    expect(container.querySelector("code")?.textContent).toContain(
+      "'<script>alert(1)</script>'",
+    );
+    expect(container.querySelectorAll(".sql-line").length).toBeGreaterThan(2);
     await user.click(
-      screen.getByRole("button", { name: "Kopieer SQL: Original SQL" }),
+      screen.getByRole("button", { name: "Kopieer SQL: Original SQL Query" }),
     );
     expect(copy).toHaveBeenCalledWith(sql);
   });
@@ -131,7 +132,7 @@ describe("SQL en fases", () => {
   });
   test("toont gemeten benchmarkdata met herkomst", () => {
     render(<PerformanceComparison attempt={attempt()} />);
-    expect(screen.getByText("5×")).toBeInTheDocument();
+    expect(screen.getByText("80% kortere duur")).toBeInTheDocument();
     expect(screen.getByText("Historisch")).toBeInTheDocument();
   });
   test("ontbrekende context wordt niet opgevuld", () => {

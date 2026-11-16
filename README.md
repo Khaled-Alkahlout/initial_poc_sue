@@ -29,6 +29,19 @@ npm run dev
 Open <http://127.0.0.1:3000> voor de POC en <http://127.0.0.1:3000/development>
 voor tests en evaluatie. Gebruik Node.js 22.12+ en één lokale API-worker.
 
+**Demo zonder provider of database.** Open `top_customers` vanuit het overzicht
+en bekijk de opgeslagen SQL, open **SQL-diff** en vergelijk correctheid en
+mediane uitvoeringstijd onder **Optimization Results**. **Technical Details**
+toont het model, de beschikbare tokens, de brongegevens en eventuele kosten.
+De workload in het overzicht is gesimuleerd. De benchmark in deze demo komt
+uit een opgeslagen testmeting. Live AI-analyse en validatie op een bevestigde
+testdatabase hebben elk hun eigen configuratie en bevestiging.
+Indexadvies is beschikbaar voor handmatige review.
+
+De querylijst leest het optionele veld `has_proposal` in de API. Dit veld geeft
+aan of er al SQL is opgeslagen bij een AI-poging voor die query.
+Het logo en de kleuren komen van de [officiële SUE-website](https://sue.nl/).
+
 - [UI-architectuur en datastroom](docs/ui-architecture.md)
 - [Installatie, demo, configuratie en tests](docs/ui-development.md)
 - [Pagina's, componenten, API en databronnen uitbreiden](docs/ui-extension-guide.md)

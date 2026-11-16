@@ -4,47 +4,83 @@ import { useEffect } from "react";
 import { api } from "@/lib/api/client";
 import type { Attempt } from "@/lib/api/contracts";
 import { SqlComparison } from "@/components/queries/sql-viewer";
+import { Badge } from "@/components/shared/status";
+import { benchmarkTime, compareBenchmark } from "@/lib/benchmark";
 
-export function RewriteSummary({ attempt }: { attempt: Attempt }) {
+export function RewriteSummary({
+  attempt,
+  measured = attempt,
+}: {
+  attempt: Attempt;
+  measured?: Attempt;
+}) {
   const sql = attempt.proposed_sql;
   useEffect(() => {
     if (attempt.diagnostics?.rewrite_requested) {
-      // Acknowledges the rendered stored value, without transmitting SQL.
+      // Acknowledge the stored value without sending SQL or its display formatting.
       void api.recordRewriteDisplay(attempt.run_id, !!sql).catch(() => {});
     }
   }, [attempt.run_id, attempt.diagnostics?.rewrite_requested, sql]);
+
   const failed = attempt.validation_state === "rewrite_parsing_failed";
   const rejected = attempt.outcome === "safety_rejected";
+  const error = attempt.outcome === "error" && !sql;
+  const measuredPair = compareBenchmark(measured);
+  const aiCandidate =
+    !!attempt.analysis || (!!attempt.model && attempt.model !== "mock");
+  const untested = !!sql && measured.correctness === "skipped" && !rejected;
   const title = failed
     ? "Rewrite parsing failed"
     : rejected
       ? "Rewrite failed static validation"
-      : sql
-        ? "SQL rewrite generated"
-        : attempt.validation_state === "analysis_failed"
-          ? "SQL rewrite request failed"
+      : error
+        ? "SQL rewrite request failed"
+        : sql
+          ? aiCandidate
+            ? "SQL rewrite generated"
+            : "SQL-kandidaat opgeslagen"
           : "No SQL rewrite proposed";
-  const reason = failed
-    ? "Het modelantwoord kon niet worden verwerkt. Dit is geen no-rewritebeslissing. Backenddiagnostiek bevat de verwerkingsstatus."
-    : rejected
-      ? `Statische controle: ${attempt.diagnostics?.candidate_rejection_reason ?? "safety_rejected"}. Het voorstel blijft zichtbaar voor review en wordt niet uitgevoerd.`
+  const empty =
+    failed || error
+      ? "Er is geen bruikbaar SQL-voorstel opgeslagen. Open Technical Details voor responsdiagnostiek."
       : (attempt.analysis?.rewrite_explanation ??
-        (sql
-          ? "Ongeteste kandidaat; afzonderlijke correctheids- en performancetests vereist."
-          : `Geen specifieke rewritebeslissing vastgelegd in dit oudere artefact. ${attempt.analysis?.uncertainty ?? ""}`));
-  return (
-    <section className="stack" aria-label="SQL rewrite">
-      <div className="notice notice-amber">
+        "Deze poging bevat geen opgeslagen SQL-voorstel.");
+  const status =
+    !sql || rejected || failed || untested ? (
+      <div className="rewrite-state">
         <h3>{title}</h3>
-        <p>{reason}</p>
-        {sql && attempt.correctness === "skipped" && !rejected && (
-          <p>Rewrite awaiting correctness validation · performance ongetest.</p>
+        {rejected && (
+          <Badge tone="red">
+            {attempt.diagnostics?.candidate_rejection_reason ??
+              "Statisch afgewezen"}
+          </Badge>
         )}
+        {untested && <Badge tone="amber">Wacht op correctheidsvalidatie</Badge>}
+        {!sql &&
+          attempt.analysis?.rewrite_status === "insufficient_context" && (
+            <Badge tone="amber">Onvoldoende context</Badge>
+          )}
       </div>
+    ) : null;
+
+  return (
+    <section aria-label="SQL rewrite">
       <SqlComparison
+        status={status}
         original={attempt.original_sql}
         proposed={sql}
-        empty={`${title}. ${reason}`}
+        empty={empty}
+        proposedLabel={
+          sql ? (aiCandidate ? "AI-voorstel" : "Testkandidaat") : undefined
+        }
+        timing={
+          measuredPair && sql
+            ? {
+                original: benchmarkTime(measuredPair.original),
+                proposed: benchmarkTime(measuredPair.proposed),
+              }
+            : undefined
+        }
       />
     </section>
   );

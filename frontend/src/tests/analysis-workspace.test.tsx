@@ -4,14 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { AnalysisWorkspace } from "@/features/queries/analysis-workspace";
 import { api } from "@/lib/api/client";
 import { query, run, system, attempt } from "./fixtures";
-import type { ReactNode } from "react";
 vi.mock("@/features/runs/run-detail", () => ({
-  RunDetail: ({ rewriteAction }: { rewriteAction?: ReactNode }) => (
-    <>
-      <p>Analyse in workspace</p>
-      {rewriteAction}
-    </>
-  ),
+  RunDetail: () => <p>Analyse in workspace</p>,
 }));
 
 test("AI-analyse vraagt bevestiging, voert geen SQL uit en blijft in de workspace", async () => {

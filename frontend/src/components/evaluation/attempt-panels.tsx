@@ -1,122 +1,34 @@
-import type { Attempt } from "@/lib/api/contracts";
+import Link from "next/link";
 import type { ReactNode } from "react";
-import { count, milliseconds } from "@/lib/formatters";
+import type { Attempt } from "@/lib/api/contracts";
+import { count, conditionLabels } from "@/lib/formatters";
+import { benchmarkTime } from "@/lib/benchmark";
+import { indexStatement } from "@/lib/sql";
 import { Card, CardHeader } from "@/components/ui/card";
-import {
-  Badge,
-  OutcomeBadge,
-  SourceBadge,
-  StatusBadge,
-} from "@/components/shared/status";
-import { EmptyState } from "@/components/shared/states";
+import { Badge, SourceBadge, StatusBadge } from "@/components/shared/status";
 import { JsonInspector } from "@/components/shared/json-inspector";
+import { TechnicalDetails } from "@/components/shared/technical-details";
+import { SqlViewer } from "@/components/queries/sql-viewer";
 import { RewriteSummary } from "./rewrite-summary";
 import { AIUsage } from "./ai-usage";
+import { OptimizationResults } from "./optimization-results";
 
-export function PerformanceComparison({ attempt }: { attempt: Attempt }) {
-  const result = attempt.benchmark;
-  const supported =
-    attempt.correctness === "passed" &&
-    ["passed", "warning"].includes(result.status);
-  return (
-    <Card>
-      <CardHeader
-        title="Performancevergelijking"
-        action={<SourceBadge source={result.origin} />}
-      />
-      {supported ? (
-        <div className="panel-body stack">
-          <dl className="kv-list">
-            <div>
-              <dt>Mediaan origineel</dt>
-              <dd>{milliseconds(result.original_ms)}</dd>
-            </div>
-            <div>
-              <dt>Mediaan voorstel</dt>
-              <dd>{milliseconds(result.proposed_ms)}</dd>
-            </div>
-            <div>
-              <dt>Gemeten speedup</dt>
-              <dd>
-                <strong>{count(result.speedup)}×</strong>
-              </dd>
-            </div>
-            <div>
-              <dt>Verschil in mediane duur</dt>
-              <dd>
-                {result.reduction_percent == null
-                  ? "Niet beschikbaar"
-                  : `${count(Math.abs(result.reduction_percent))}% ${result.reduction_percent >= 0 ? "lager" : "hoger"}`}
-              </dd>
-            </div>
-            <div>
-              <dt>IQR origineel / voorstel</dt>
-              <dd>
-                {count(result.original_iqr_ms)} /{" "}
-                {count(result.proposed_iqr_ms)} ms
-              </dd>
-            </div>
-            <div>
-              <dt>Herhalingen</dt>
-              <dd>{count(result.repetitions)}</dd>
-            </div>
-          </dl>
-          <p className="muted text-xs">
-            Gemeten op de testdataset. Dit is geen modelvoorspelling of
-            productiegoedkeuring. De totale benchmarkduur is niet afzonderlijk
-            vastgelegd.
-          </p>
-        </div>
-      ) : (
-        <EmptyState
-          title="Geen onderbouwde performanceconclusie"
-          description="Er is geen bruikbare benchmark, of de correctheid is niet voldoende vastgesteld. Eventuele ruwe meetvelden staan bij de metadata."
-        />
-      )}
-    </Card>
-  );
-}
-export function CorrectnessComparison({ attempt }: { attempt: Attempt }) {
-  return (
-    <Card>
-      <CardHeader
-        title="Correctheidscontrole"
-        action={<StatusBadge status={attempt.correctness} />}
-      />
-      <div className="panel-body stack">
-        <dl className="kv-list">
-          <div>
-            <dt>Geteste parametersets</dt>
-            <dd>{count(attempt.parameter_sets)}</dd>
-          </div>
-          <div>
-            <dt>Afwijkend / niet afgerond</dt>
-            <dd>{count(attempt.failing_parameter_sets)}</dd>
-          </div>
-          <div>
-            <dt>Legacy-oordeel</dt>
-            <dd className="mono">
-              {attempt.raw_verdict ?? "Niet beschikbaar"}
-            </dd>
-          </div>
-        </dl>
-        <p className="muted text-xs">
-          {attempt.detail ||
-            "Geen afwijkingsdetails geregistreerd. Gelijkheid geldt uitsluitend binnen de geteste voorwaarden."}
-        </p>
-        <OutcomeBadge outcome={attempt.outcome} />
-      </div>
-    </Card>
-  );
-}
 export function ContextViewer({ attempt }: { attempt: Attempt }) {
   return (
     <Card>
       <CardHeader
         title="Context voor het model"
-        description={attempt.condition ?? "Contextconditie niet vastgelegd"}
+        description={
+          conditionLabels[attempt.condition ?? ""] ??
+          "Contextconditie niet vastgelegd"
+        }
       />
       <div className="panel-body context-grid">
+        {attempt.context.length === 0 && (
+          <p className="muted text-sm">
+            Geen context opgeslagen voor deze poging.
+          </p>
+        )}
         {attempt.context.map((section) => (
           <details className="context-item" key={section.id}>
             <summary>
@@ -142,7 +54,17 @@ export function ContextViewer({ attempt }: { attempt: Attempt }) {
             <div>
               <p className="muted text-xs mb-3">{section.note}</p>
               {section.text ? (
-                <pre className="context-text">{section.text}</pre>
+                ["query", "previous_candidate"].includes(section.id) ? (
+                  <SqlViewer sql={section.text} title={section.label} />
+                ) : (
+                  <pre
+                    className="context-text"
+                    tabIndex={0}
+                    aria-label={section.label}
+                  >
+                    {section.text}
+                  </pre>
+                )
               ) : (
                 <p className="muted text-xs">Geen contexttekst beschikbaar.</p>
               )}
@@ -153,162 +75,251 @@ export function ContextViewer({ attempt }: { attempt: Attempt }) {
     </Card>
   );
 }
-export function AttemptPanels({
-  attempt,
-  rewriteAction,
-}: {
-  attempt: Attempt;
-  rewriteAction?: ReactNode;
-}) {
+
+function AdviceList({ values }: { values: string[] }) {
   return (
-    <div className="stack">
-      {attempt.model && <AIUsage attempt={attempt} />}
-      <RewriteSummary attempt={attempt} />
-      {rewriteAction}
-      {attempt.analysis && (
-        <Card>
-          <CardHeader
-            title="AI-analyse · advies, geen bewezen verbetering"
-            description="Modelinterpretatie en kwalitatieve verwachtingen blijven gescheiden van gemeten resultaten."
-          />
-          <div className="panel-body stack">
-            {(
-              [
-                ["Probleem geïdentificeerd", attempt.analysis.problem],
-                ["Vermoedelijke oorzaak", attempt.analysis.root_cause],
-                [
-                  "Verwachte impact · hypothese",
-                  attempt.analysis.expected_benefit,
-                ],
-                ["Onzekerheid", attempt.analysis.uncertainty],
-              ] as const
-            ).map(([title, value]) => (
-              <section key={title}>
-                <h3>{title}</h3>
-                <p className="muted text-sm mt-2">{value}</p>
-              </section>
-            ))}
-            {(
-              [
-                [
-                  "Indexadvies · alleen review, nooit uitgevoerd",
-                  attempt.analysis.index_recommendations,
-                ],
-                [
-                  "Correctheidsrisico’s en aannames",
-                  attempt.analysis.correctness_risks,
-                ],
-                ["Te valideren", attempt.analysis.validation_recommendations],
-                ["Ontbrekende context", attempt.analysis.missing_context],
-              ] as const
-            ).map(([title, values]) => (
-              <section key={title}>
-                <h3>{title}</h3>
-                {values.length ? (
-                  <ul className="list-disc pl-4 text-sm muted mt-2">
-                    {values.map((value, i) => (
-                      <li key={i}>{value}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="muted text-xs mt-2">
-                    Geen punten door het model opgegeven; dit is geen bewijs dat
-                    er geen risico’s zijn.
-                  </p>
-                )}
-              </section>
-            ))}
-            <p className="notice notice-amber">
-              {(
-                {
-                  awaiting_validation:
-                    "AI-voorstel gegenereerd · wacht op validatie",
-                  validation_unavailable:
-                    "AI-voorstel gegenereerd · validatie niet beschikbaar",
-                  validated_improvement:
-                    "Gemeten verbetering binnen de geteste voorwaarden",
-                  correctness_failed: "Correctheid afgewezen",
-                  performance_regression: "Gemeten performanceregressie",
-                  not_faster: "Geen gemeten verbetering",
-                  validation_error: "Technische validatiefout",
-                  inconclusive: "Validatie onbeslist",
-                  no_rewrite_proposed:
-                    "Geen SQL-kandidaat; indexadvies blijft beschikbaar",
-                  rewrite_static_rejected:
-                    "SQL-voorstel afgewezen door statische controle",
-                  rewrite_parsing_failed:
-                    "SQL-rewrite kon niet worden verwerkt",
-                } as Record<string, string>
-              )[attempt.validation_state ?? ""] ??
-                "Voorstel vereist onafhankelijke review."}
-            </p>
-          </div>
-        </Card>
-      )}
-      <div className="grid-two">
-        <CorrectnessComparison attempt={attempt} />
-        <PerformanceComparison attempt={attempt} />
-      </div>
-      <ContextViewer attempt={attempt} />
+    <ul className="advice-list">
+      {values.map((value, index) => (
+        <li key={index}>{value}</li>
+      ))}
+    </ul>
+  );
+}
+
+function Explanation({ attempt }: { attempt: Attempt }) {
+  const analysis = attempt.analysis;
+  if (!analysis) {
+    const explanation = attempt.explanation
+      ?.replace(/```[^\r\n]*\r?\n[\s\S]*?```/g, "")
+      .split(/\r?\n[ \t]*\r?\n/)
+      .map((paragraph) => paragraph.trim())
+      .find(
+        (paragraph) =>
+          paragraph && !/^(?:SELECT|WITH|CREATE|EXPLAIN)\b/i.test(paragraph),
+      );
+    return (
       <Card>
-        <CardHeader title="Model- en responsegegevens" />
-        <div className="panel-body stack">
-          <dl className="kv-list">
-            <div>
-              <dt>Model-ID uit het artefact</dt>
-              <dd className="mono">{attempt.model ?? "Niet vastgelegd"}</dd>
-            </div>
-            <div>
-              <dt>Input / outputtokens</dt>
-              <dd>
-                {count(attempt.input_tokens)} / {count(attempt.output_tokens)}
-              </dd>
-            </div>
-            <div>
-              <dt>Vastgelegde requestduur</dt>
-              <dd>
-                {attempt.llm_seconds == null
-                  ? "Niet vastgelegd"
-                  : `${count(attempt.llm_seconds)} s`}
-              </dd>
-            </div>
-            <div>
-              <dt>Ongewijzigde SQL-structuur</dt>
-              <dd>
-                {attempt.unchanged == null
-                  ? "Niet bepaald"
-                  : attempt.unchanged
-                    ? "Ja"
-                    : "Nee"}
-              </dd>
-            </div>
-            <div>
-              <dt>Provider</dt>
-              <dd>{attempt.provider ?? "Historisch / niet vastgelegd"}</dd>
-            </div>
-            <div>
-              <dt>API-kosten</dt>
-              <dd>
-                {attempt.cost_usd == null
-                  ? "Niet betrouwbaar vastgelegd"
-                  : `$${attempt.cost_usd.toFixed(6)} USD · ${attempt.cost_kind === "reported" ? "door provider gerapporteerd" : "geschat"}`}
-              </dd>
-            </div>
-          </dl>
-          {attempt.explanation ? (
-            <details className="inspector">
-              <summary>Opgeslagen modelantwoord · geredigeerd</summary>
-              <pre>{attempt.explanation}</pre>
-            </details>
-          ) : (
-            <p className="muted text-xs">Geen modelantwoord beschikbaar.</p>
-          )}
+        <CardHeader
+          title="What changed and why?"
+          action={
+            explanation && <Badge tone="brand">Opgeslagen modeluitleg</Badge>
+          }
+        />
+        <div className="panel-body">
+          <p className="muted text-sm legacy-explanation">
+            {explanation ??
+              "Voor deze poging is geen afzonderlijke modeltoelichting opgeslagen."}
+          </p>
         </div>
       </Card>
-      <JsonInspector
-        value={attempt.raw_record}
-        title="Oorspronkelijke resultaatvelden · geredigeerd"
+    );
+  }
+  const points = [
+    ["Vastgesteld probleem", analysis.problem],
+    ["Vermoedelijke oorzaak", analysis.root_cause],
+    ...(analysis.rewrite_explanation && attempt.proposed_sql
+      ? [["Voorgestelde wijziging", analysis.rewrite_explanation]]
+      : []),
+    ["Verwachte impact", analysis.expected_benefit],
+    ["Onzekerheid", analysis.uncertainty],
+  ];
+  return (
+    <Card>
+      <CardHeader
+        title="What changed and why?"
+        action={<Badge tone="brand">AI-uitleg</Badge>}
       />
+      <div className="panel-body explanation-grid">
+        {points.map(([title, value]) => (
+          <div key={title}>
+            <h3>{title}</h3>
+            <p>{value}</p>
+          </div>
+        ))}
+        {!!analysis.correctness_risks.length && (
+          <div>
+            <h3>Risico’s en aannames</h3>
+            <AdviceList values={analysis.correctness_risks} />
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function IndexRecommendations({
+  recommendations,
+}: {
+  recommendations: string[];
+}) {
+  if (!recommendations.length) return null;
+  const markdownCode =
+    /(```(?:sql|postgresql)?[ \t]*\r?\n[\s\S]*?\r?\n```|`[^`\r\n]+`)/gi;
+  return (
+    <Card>
+      <CardHeader
+        title="Index recommendations"
+        description="Indexadvies voor handmatige review. Uitvoering en metingen voor deze indexvoorstellen zijn niet beschikbaar."
+        action={<Badge tone="brand">AI-advies</Badge>}
+      />
+      <ul className="panel-body index-advice">
+        {recommendations.map((recommendation, index) => (
+          <li key={index}>
+            {recommendation.split(markdownCode).map((part, block) => {
+              if (!part.trim()) return null;
+              const sql = part
+                .replace(/^```(?:sql|postgresql)?[ \t]*\r?\n|\r?\n```$/gi, "")
+                .replace(/^`|`$/g, "");
+              return indexStatement.test(sql) ? (
+                <SqlViewer key={block} sql={sql} title="Indexvoorstel · SQL" />
+              ) : (
+                <p key={block}>{part}</p>
+              );
+            })}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+export function AttemptPanels({
+  attempt,
+  measured = attempt,
+  validationAction,
+  technical,
+}: {
+  attempt: Attempt;
+  measured?: Attempt;
+  validationAction?: ReactNode;
+  technical?: ReactNode;
+}) {
+  const { benchmark } = measured;
+  const analysis = attempt.analysis;
+  return (
+    <div className="stack">
+      <RewriteSummary attempt={attempt} measured={measured} />
+      <Explanation attempt={attempt} />
+      <OptimizationResults attempt={measured} action={validationAction} />
+      <IndexRecommendations
+        recommendations={analysis?.index_recommendations ?? []}
+      />
+      <TechnicalDetails description="Model, tokens, kosten, execution plans en diagnostiek">
+        <AIUsage attempt={attempt} />
+        {attempt.context.length > 0 && <ContextViewer attempt={attempt} />}
+        <Card>
+          <CardHeader
+            title="Validatie- en benchmarkgegevens"
+            action={<SourceBadge source={benchmark.origin} />}
+          />
+          <div className="panel-body stack">
+            <dl className="kv-list">
+              <div>
+                <dt>Database-dialect</dt>
+                <dd>PostgreSQL</dd>
+              </div>
+              <div>
+                <dt>Validatiepoging</dt>
+                <dd className="mono">{measured.id}</dd>
+              </div>
+              <div>
+                <dt>Validatoroordeel</dt>
+                <dd className="mono">
+                  {measured.raw_verdict ?? "Niet beschikbaar"}
+                </dd>
+              </div>
+              <div>
+                <dt>Benchmarkstatus</dt>
+                <dd>
+                  <StatusBadge status={benchmark.status} />
+                </dd>
+              </div>
+              <div>
+                <dt>Mediane tijden · origineel / voorstel</dt>
+                <dd>
+                  {benchmark.original_ms == null
+                    ? "—"
+                    : benchmarkTime(benchmark.original_ms)}{" "}
+                  /{" "}
+                  {benchmark.proposed_ms == null
+                    ? "—"
+                    : benchmarkTime(benchmark.proposed_ms)}
+                </dd>
+              </div>
+              <div>
+                <dt>IQR · origineel / voorstel</dt>
+                <dd>
+                  {count(benchmark.original_iqr_ms)} /{" "}
+                  {count(benchmark.proposed_iqr_ms)} ms
+                </dd>
+              </div>
+              <div>
+                <dt>Gemeten speedup</dt>
+                <dd>
+                  {benchmark.speedup == null
+                    ? "Niet beschikbaar"
+                    : count(benchmark.speedup) + "×"}
+                </dd>
+              </div>
+              <div>
+                <dt>Herhalingen</dt>
+                <dd>{count(benchmark.repetitions)}</dd>
+              </div>
+              <div>
+                <dt>Ongewijzigde SQL-structuur</dt>
+                <dd>
+                  {attempt.unchanged == null
+                    ? "Niet bepaald"
+                    : attempt.unchanged
+                      ? "Ja"
+                      : "Nee"}
+                </dd>
+              </div>
+            </dl>
+            {measured.detail && (
+              <p className="muted text-sm">{measured.detail}</p>
+            )}
+            {analysis && (
+              <div className="explanation-grid">
+                {!!analysis.validation_recommendations.length && (
+                  <div>
+                    <h3>Te valideren volgens het model</h3>
+                    <AdviceList values={analysis.validation_recommendations} />
+                  </div>
+                )}
+                {!!analysis.missing_context.length && (
+                  <div>
+                    <h3>Ontbrekende context volgens het model</h3>
+                    <AdviceList values={analysis.missing_context} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+        {attempt.explanation && (
+          <details className="inspector">
+            <summary>Opgeslagen modelantwoord · geredigeerd</summary>
+            <pre tabIndex={0}>{attempt.explanation}</pre>
+          </details>
+        )}
+        <JsonInspector
+          value={attempt.raw_record}
+          title="Oorspronkelijke resultaatvelden · geredigeerd"
+        />
+        {measured.id !== attempt.id && (
+          <>
+            <JsonInspector
+              value={measured.raw_record}
+              title="Resultaatvelden van de onafhankelijke validatie"
+            />
+            <Link className="text-link" href={"/runs/" + measured.run_id}>
+              Open validatierun
+            </Link>
+          </>
+        )}
+        {technical}
+      </TechnicalDetails>
     </div>
   );
 }

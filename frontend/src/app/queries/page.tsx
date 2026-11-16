@@ -10,9 +10,8 @@ export default async function Page() {
   return (
     <div className="stack">
       <PageHeader
-        eyebrow="POC / TELEMETRIE & SELECTIE"
         title="Query Explorer"
-        description="Van workload naar prioriteit. Ontdek welke query's geschikt zijn voor analyse, waarom ze worden geselecteerd en welke impact ze vertegenwoordigen."
+        description="Zoek een SQL-query en bekijk hoe de selector de workload prioriteert."
       />
       <QueryExplorer initial={result.data} />
     </div>

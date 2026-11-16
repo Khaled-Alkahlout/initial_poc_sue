@@ -18,5 +18,11 @@ export default async function Page({
     if (result.status === 404) notFound();
     return <ErrorState message={result.message} />;
   }
-  return <RunDetail initial={result.data} initialAttemptId={search.attempt} />;
+  return (
+    <RunDetail
+      key={id + ":" + (search.attempt ?? "")}
+      initial={result.data}
+      initialAttemptId={search.attempt}
+    />
+  );
 }

@@ -7,14 +7,13 @@ import {
   QueryDecision,
   QueryMetrics,
 } from "@/components/queries/query-decision";
-import { SqlViewer } from "@/components/queries/sql-viewer";
 import { ContextViewer } from "@/components/evaluation/attempt-panels";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/states";
-import { conditionLabels } from "@/lib/formatters";
+import { TechnicalDetails } from "@/components/shared/technical-details";
+import { conditionLabels, count, milliseconds } from "@/lib/formatters";
 import { StartRun } from "@/features/runs/start-run";
 import { AnalysisWorkspace } from "./analysis-workspace";
-import { Button } from "@/components/ui/button";
 
 export function QueryDetailView({
   query,
@@ -23,97 +22,113 @@ export function QueryDetailView({
   query: QueryDetail;
   system: SystemStatus;
 }) {
-  const context =
-    query.attempts.find((attempt) => attempt.condition === "C4_stats") ??
-    query.attempts[0];
+  const context = query.attempts.find(
+    (attempt) =>
+      attempt.origin === "historical" && attempt.condition === "C4_stats",
+  );
   return (
-    <div className="stack">
+    <div className="stack query-detail">
       <Link href="/queries" className="text-link">
-        <ArrowLeft size={13} />
-        Alle query&apos;s
+        <ArrowLeft size={14} /> Alle query’s
       </Link>
-      <PageHeader
-        eyebrow="POC / QUERY-INSPECTIE"
-        title={query.query_id}
-        description="Inspecteer SQL, selectiebeslissingen en beschikbare resultaten. Het openen van deze pagina voert niets uit."
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Button asChild>
-              <a href="#ai-workspace">Analyze with AI</a>
-            </Button>
+      <div className="query-heading">
+        <PageHeader
+          title={query.query_id}
+          description="Bekijk de query, het voorstel en het beschikbare validatiebewijs."
+          action={
             <StartRun
               queries={[query]}
               queryId={query.query_id}
               system={system}
             />
-          </div>
-        }
-      />
-      <SqlViewer sql={query.sql} title="Originele SQL · bestaande fixture" />
-      <div className="grid-two">
-        <QueryMetrics query={query} />
-        <QueryDecision query={query} />
+          }
+        />
+        <div className="query-facts">
+          <SourceBadge source={query.is_synthetic ? "synthetic" : "measured"} />
+          <dl>
+            <div>
+              <dt>Prioriteit</dt>
+              <dd>{query.rank ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Gemiddelde duur</dt>
+              <dd>{milliseconds(query.mean_execution_time_ms)}</dd>
+            </div>
+            <div>
+              <dt>Uitvoeringen</dt>
+              <dd>{count(query.calls)}</dd>
+            </div>
+          </dl>
+        </div>
       </div>
       <div id="ai-workspace">
         <AnalysisWorkspace key={query.query_id} query={query} system={system} />
       </div>
-      {context ? (
-        <ContextViewer attempt={context} />
-      ) : (
-        <EmptyState
-          title="Geen opgeslagen context"
-          description="Er is geen context opgehaald; queryinspectie voert zelf geen databasequery uit."
-        />
-      )}
-      <Card>
-        <CardHeader
-          title="Beschikbare voorstellen & tests"
-          description="Een poging is geen onafhankelijke querycase. De technische conclusie komt uit de backendadapter."
-          action={<SourceBadge source="historical" />}
-        />
-        {query.attempts.length ? (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Kandidaat</th>
-                  <th>Context</th>
-                  <th>Resultaat</th>
-                  <th>Bron</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {query.attempts.map((attempt) => (
-                  <tr key={attempt.id}>
-                    <td className="mono">{attempt.candidate}</td>
-                    <td>
-                      {conditionLabels[attempt.condition ?? ""] ??
-                        "Niet vastgelegd"}
-                    </td>
-                    <td>
-                      <OutcomeBadge outcome={attempt.outcome} />
-                    </td>
-                    <td>
-                      <SourceBadge source={attempt.origin} />
-                    </td>
-                    <td>
-                      <Link
-                        className="text-link"
-                        href={`/runs/${attempt.run_id}?attempt=${encodeURIComponent(attempt.id)}`}
-                      >
-                        Inspecteren <ArrowUpRight size={12} />
-                      </Link>
-                    </td>
+      <TechnicalDetails
+        title="Querygegevens"
+        description="Workload, selectie en opgeslagen context"
+      >
+        <div className="grid-two">
+          <QueryMetrics query={query} />
+          <QueryDecision query={query} />
+        </div>
+        {context && <ContextViewer attempt={context} />}
+      </TechnicalDetails>
+      <TechnicalDetails
+        title="Analysehistorie voor deze query"
+        description={count(query.attempts.length) + " opgeslagen pogingen"}
+      >
+        <Card>
+          <CardHeader title="Voorstellen en tests" />
+          {query.attempts.length ? (
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Kandidaat</th>
+                    <th>Context</th>
+                    <th>Resultaat</th>
+                    <th>Bron</th>
+                    <th aria-label="Openen" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState title="Nog geen voorstellen" />
-        )}
-      </Card>
+                </thead>
+                <tbody>
+                  {query.attempts.map((attempt) => (
+                    <tr key={attempt.id}>
+                      <td className="mono">{attempt.candidate}</td>
+                      <td>
+                        {conditionLabels[attempt.condition ?? ""] ??
+                          "Niet vastgelegd"}
+                      </td>
+                      <td>
+                        <OutcomeBadge outcome={attempt.outcome} />
+                      </td>
+                      <td>
+                        <SourceBadge source={attempt.origin} />
+                      </td>
+                      <td>
+                        <Link
+                          className="text-link"
+                          href={
+                            "/runs/" +
+                            attempt.run_id +
+                            "?attempt=" +
+                            encodeURIComponent(attempt.id)
+                          }
+                        >
+                          Inspecteren <ArrowUpRight size={12} />
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="Nog geen voorstellen" />
+          )}
+        </Card>
+      </TechnicalDetails>
     </div>
   );
 }

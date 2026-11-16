@@ -7,6 +7,7 @@ import { count } from "@/lib/formatters";
 import { Badge, SourceBadge } from "@/components/shared/status";
 import { Input, Select } from "@/components/ui/fields";
 import { EmptyState } from "@/components/shared/states";
+import { SqlPreview } from "./sql-viewer";
 
 type SortKey =
   | "query_id"
@@ -29,15 +30,13 @@ const columns: Column[] = [
     sort: "query_id",
     render: (q) => (
       <>
-        <Link className="mono" href={`/queries/${q.query_id}`}>
+        <Link
+          className="query-link mono"
+          href={"/queries/" + encodeURIComponent(q.query_id)}
+        >
           {q.query_id}
         </Link>
-        <span className="cell-secondary cell-preview mono">
-          {q.sql
-            ?.split("\n")
-            .filter((line) => !line.trim().startsWith("--"))
-            .join(" ") ?? "SQL ontbreekt"}
-        </span>
+        <SqlPreview sql={q.sql} />
       </>
     ),
   },
@@ -102,11 +101,14 @@ const columns: Column[] = [
     id: "analysis",
     label: "Analyse",
     render: (q) => (
-      <span className="muted">
-        {q.analyzed
-          ? `${q.analysis_count} vastgelegd`
-          : "Nog niet geanalyseerd"}
-      </span>
+      <>
+        <span className="query-analysis muted">
+          {q.analyzed
+            ? q.analysis_count + " opgeslagen"
+            : "Nog niet geanalyseerd"}
+        </span>
+        {q.has_proposal && <Badge tone="brand">SQL-voorstel</Badge>}
+      </>
     ),
   },
 ];
@@ -156,7 +158,19 @@ export function QueryTable({ queries }: { queries: Query[] }) {
   const currentPage = Math.min(page, lastPage);
   return (
     <>
-      <div className="toolbar">
+      <div className="toolbar query-filters">
+        <div className="search-wrap">
+          <Search size={15} />
+          <Input
+            aria-label="Zoek query of SQL"
+            placeholder="Zoek op query-ID of SQL…"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(0);
+            }}
+          />
+        </div>
         <Input
           type="number"
           min="0"
@@ -179,15 +193,6 @@ export function QueryTable({ queries }: { queries: Query[] }) {
             setPage(0);
           }}
         />
-        <div className="search-wrap">
-          <Search size={15} />
-          <Input
-            aria-label="Zoek query of SQL"
-            placeholder="Zoek op query-ID of SQL…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
         <Select
           aria-label="Filter op selectiestatus"
           value={decision}
@@ -277,7 +282,7 @@ export function QueryTable({ queries }: { queries: Query[] }) {
       ) : (
         <EmptyState
           title="Geen query's gevonden"
-          description="Pas de zoekterm of filters aan. Er worden geen fictieve vervangende resultaten getoond."
+          description="Pas de zoekterm of filters aan om meer resultaten te zien."
         />
       )}
       <div className="table-footer">

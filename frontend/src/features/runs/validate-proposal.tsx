@@ -6,18 +6,35 @@ import type { Run, SystemStatus } from "@/lib/api/contracts";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 
-export function ValidateProposal({ run }: { run: Run }) {
+export function ValidateProposal({
+  run,
+  system: initialSystem,
+}: {
+  run: Run;
+  system?: SystemStatus;
+}) {
   const router = useRouter();
-  const [system, setSystem] = useState<SystemStatus | null>(null);
+  const [system, setSystem] = useState<SystemStatus | null>(
+    initialSystem ?? null,
+  );
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    if (initialSystem) return;
+    let disposed = false;
     api
       .getSystem()
-      .then(setSystem)
-      .catch((e) => setError(errorMessage(e)));
-  }, []);
+      .then((value) => {
+        if (!disposed) setSystem(value);
+      })
+      .catch((reason) => {
+        if (!disposed) setError(errorMessage(reason));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [initialSystem]);
   const allowed = system?.run_modes.find((m) => m.id === "validate");
   const attempt = run.attempts[0];
   async function validate() {
@@ -41,16 +58,18 @@ export function ValidateProposal({ run }: { run: Run }) {
     }
   }
   return (
-    <Card>
+    <Card id="validate-proposal">
       <CardHeader
         title="Voorstel afzonderlijk valideren"
-        description="Geen nieuwe modelcall. Correctheid en performance worden op de bevestigde testdatabase afzonderlijk beoordeeld."
+        description="Vergelijk het opgeslagen voorstel met het origineel op de bevestigde testdatabase."
       />
       <div className="panel-body stack">
-        <p className="notice notice-amber">
-          {allowed?.available
-            ? "SQL-uitvoering beschikbaar op het door de operator bevestigde testdoel."
-            : "Validatie niet beschikbaar. Beide SQL-veiligheidsinstellingen, een geïsoleerde testdatabase en psycopg zijn vereist. AI-advies blijft bruikbaar voor menselijke review."}
+        <p className="muted text-sm" role={system ? undefined : "status"}>
+          {!system && !error
+            ? "Beschikbaarheid van testdatabasevalidatie controleren…"
+            : allowed?.available
+              ? "SQL-uitvoering beschikbaar op het door de operator bevestigde testdoel."
+              : "Validatie niet beschikbaar. Beide SQL-veiligheidsinstellingen, een geïsoleerde testdatabase en psycopg zijn vereist. AI-advies blijft bruikbaar voor menselijke review."}
         </p>
         {allowed?.available && (
           <label className="check-field">
@@ -60,7 +79,7 @@ export function ValidateProposal({ run }: { run: Run }) {
               onChange={(e) => setConsent(e.target.checked)}
             />
             <span>
-              Ik bevestig vergelijking en zeven benchmarkherhalingen op de
+              Ik bevestig resultaatvergelijking en benchmarking op de
               geïsoleerde testdatabase.
             </span>
           </label>

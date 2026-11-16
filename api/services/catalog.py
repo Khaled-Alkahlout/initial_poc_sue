@@ -134,6 +134,9 @@ class Catalog:
                     related_run_ids=[r.id for r in runs],
                     analysis_count=len(attempts),
                     latest_outcome=attempts[0].outcome if attempts else None,
+                    has_proposal=any(
+                        a.proposed_sql and a.proposed_sql.strip() for a in attempts
+                    ),
                 )
             )
         return QueryCollection(queries=queries, policy=selection.policy.to_dict())

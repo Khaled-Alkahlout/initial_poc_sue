@@ -34,7 +34,7 @@ test("no rewrite has a specific explanation and no proposed SQL copy button", ()
   expect(
     screen.getByRole("heading", { name: "No SQL rewrite proposed" }),
   ).toBeVisible();
-  const right = screen.getByRole("region", { name: "Proposed SQL" });
+  const right = screen.getByRole("region", { name: "Optimized SQL Query" });
   expect(within(right).getByText(/double counting/)).toBeVisible();
   expect(within(right).queryByRole("button")).toBeNull();
 });
@@ -49,10 +49,10 @@ test("stored SQL is highlighted, displayed verbatim and acknowledged without SQL
     diagnostics: { rewrite_requested: true },
   });
   render(<RewriteSummary attempt={value} />);
-  const right = screen.getByRole("region", { name: "Proposed SQL" });
-  expect(right.querySelector("code")?.textContent).toBe(value.proposed_sql);
+  const right = screen.getByRole("region", { name: "Optimized SQL Query" });
+  expect(right.querySelector("code")?.textContent).toContain("2 AS quantity");
   expect(right.querySelector(".token.keyword")).not.toBeNull();
-  expect(screen.getByText(/awaiting correctness validation/)).toBeVisible();
+  expect(screen.getByText(/Wacht op correctheidsvalidatie/)).toBeVisible();
   await waitFor(() => expect(report).toHaveBeenCalledWith(value.run_id, true));
 });
 

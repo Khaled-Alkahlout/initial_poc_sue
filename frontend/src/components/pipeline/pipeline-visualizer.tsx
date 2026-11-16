@@ -1,83 +1,105 @@
 import type { Stage } from "@/lib/api/contracts";
 import { StatusBadge } from "@/components/shared/status";
-import { milliseconds } from "@/lib/formatters";
-import { ChevronDown } from "lucide-react";
+import { milliseconds, sourceLabels } from "@/lib/formatters";
+import {
+  Check,
+  ChevronDown,
+  Circle,
+  Clock3,
+  FileCode2,
+  Filter,
+  Flag,
+  Hourglass,
+  Layers,
+  Minus,
+  ShieldCheck,
+  Sparkles,
+  Timer,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 
 const definition = [
-  "Queryselectie",
-  "Context",
-  "LLM-generatie",
-  "SQL-controle",
-  "Correctheid",
-  "Benchmark",
-  "Resultaat",
+  { id: "selection", label: "Queryselectie", icon: Filter },
+  { id: "context", label: "Context", icon: Layers },
+  { id: "generation", label: "LLM-generatie", icon: Sparkles },
+  { id: "static", label: "SQL-controle", icon: FileCode2 },
+  { id: "correctness", label: "Correctheid", icon: ShieldCheck },
+  { id: "benchmark", label: "Benchmark", icon: Timer },
+  { id: "result", label: "Resultaat", icon: Flag },
 ];
-export function PipelineVisualizer({
-  stages,
-  compact = false,
-}: {
-  stages?: Stage[];
-  compact?: boolean;
-}) {
-  if (!stages)
+
+const stateIcon = {
+  pending: Hourglass,
+  running: Clock3,
+  passed: Check,
+  failed: X,
+  warning: TriangleAlert,
+  inconclusive: Circle,
+  skipped: Minus,
+  error: X,
+};
+
+export function PipelineVisualizer({ stages }: { stages?: Stage[] }) {
+  if (!stages) {
     return (
       <ol
         className="pipeline pipeline-compact"
         aria-label="Pipelineonderdelen, geen actuele runstatus"
       >
-        {definition.map((label, index) => (
-          <li key={label}>
-            <span className="stage-number">{index + 1}</span>
-            <h3>{label}</h3>
+        {definition.map(({ id, label, icon: Icon }) => (
+          <li key={id}>
+            <span className="stage-icon">
+              <Icon size={18} />
+            </span>
+            <span>{label}</span>
           </li>
         ))}
       </ol>
     );
+  }
+  if (!stages.length)
+    return <p className="panel-body muted">Geen fasestatus geregistreerd.</p>;
   return (
     <ol
-      className={
-        compact ? "pipeline pipeline-compact" : "pipeline pipeline-detail"
-      }
+      className="pipeline pipeline-compact pipeline-status"
       aria-label="Pipelinefases"
     >
-      {stages.map((stage, index) => (
-        <li key={stage.id}>
-          {compact ? (
-            <>
-              <span className="stage-number">{index + 1}</span>
-              <h3>{stage.label}</h3>
-              <StatusBadge status={stage.status} />
-            </>
-          ) : (
+      {stages.map((stage) => {
+        const label =
+          definition.find(({ id }) => id === stage.id)?.label ?? stage.label;
+        const Icon = stateIcon[stage.status];
+        return (
+          <li
+            key={stage.id}
+            data-status={stage.status}
+            aria-current={stage.status === "running" ? "step" : undefined}
+          >
             <details>
               <summary>
-                <span className="stage-number">{index + 1}</span>
-                <h3>{stage.label}</h3>
-                <span className="stage-duration">
+                <span className="stage-icon">
+                  <Icon size={17} />
+                </span>
+                <span className="stage-caption">
+                  {label}
+                  <ChevronDown size={12} />
+                </span>
+                <StatusBadge status={stage.status} />
+              </summary>
+              <div className="stage-note">
+                <p>{stage.note}</p>
+                <small>
+                  {sourceLabels[stage.origin] ?? stage.origin}
+                  {" · "}
                   {stage.duration_ms == null
                     ? "Duur niet vastgelegd"
                     : milliseconds(stage.duration_ms)}
-                </span>
-                <StatusBadge status={stage.status} />
-                <ChevronDown size={13} />
-              </summary>
-              <p className="stage-note">
-                {stage.note}
-                <br />
-                <span>
-                  Bron:{" "}
-                  {stage.origin === "historical"
-                    ? "historisch artefact"
-                    : stage.origin === "measured"
-                      ? "testmeting"
-                      : "huidige uitvoering"}
-                  .
-                </span>
-              </p>
+                </small>
+              </div>
             </details>
-          )}
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ol>
   );
 }

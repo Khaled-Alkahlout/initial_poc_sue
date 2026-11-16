@@ -47,6 +47,10 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(queries.queries[0].impact_ms, 500000)
         self.assertEqual(sum(q.selected for q in queries.queries), 1)
         self.assertTrue(all(q.is_synthetic for q in queries.queries))
+        query = next(q for q in queries.queries if q.query_id == "top_customers")
+        detail = self.client.get("/api/queries/top_customers").json()
+        self.assertTrue(query.has_proposal)
+        self.assertTrue(any(a["proposed_sql"] for a in detail["attempts"]))
         self.assertEqual(
             next(m.value for m in overview.metrics if m.id == "requests"), 50
         )

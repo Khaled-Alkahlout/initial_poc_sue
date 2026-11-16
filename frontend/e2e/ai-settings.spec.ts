@@ -42,12 +42,13 @@ test("opgeslagen analyse toont echte usage en een finish reason", async ({
     "Geen nieuwe analyse beschikbaar; deze test start geen betaald request.",
   );
   await page.goto(`/runs/${run.id}`);
+  await page.getByText("Technical Details", { exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "AI Analysis · werkelijk gebruik" }),
+    page.getByRole("heading", { name: "AI-model en gebruik" }),
   ).toBeVisible();
   await expect(page.getByText("Finish reason", { exact: true })).toBeVisible();
   await page
-    .getByRole("heading", { name: "AI Analysis · werkelijk gebruik" })
+    .getByRole("heading", { name: "AI-model en gebruik" })
     .scrollIntoViewIfNeeded();
   await page.screenshot({ path: "test-results/ai-usage.png", fullPage: false });
 });
