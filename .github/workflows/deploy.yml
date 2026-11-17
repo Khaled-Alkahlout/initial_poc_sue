@@ -1,5 +1,5 @@
 
-name: Build AI Tool
+name: Build and Push AI Tool
 
 on:
   push:
@@ -7,12 +7,31 @@ on:
       - aws-deployment
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::710414398852:role/sue-github-actions-role
+          aws-region: eu-north-1
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Build Docker image
         run: docker build -t sue-ai-tool .
+
+      - name: Tag and push to ECR
+        run: |
+          docker tag sue-ai-tool:latest 710414398852.dkr.ecr.eu-north-1.amazonaws.com/sue-ai-tool:latest
+          docker push 710414398852.dkr.ecr.eu-north-1.amazonaws.com/sue-ai-tool:latest
