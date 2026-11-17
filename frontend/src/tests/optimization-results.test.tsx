@@ -132,7 +132,13 @@ test("historical model prose is shown beside the comparison and full SQL stays i
       })}
     />,
   );
-  expect(screen.getByText(explanation, { exact: true })).toBeVisible();
+  const summary = screen.getByText("Wat is veranderd en waarom?", {
+    exact: true,
+  });
+  const prose = screen.getByText(explanation, { exact: true });
+  expect(prose).not.toBeVisible();
+  await userEvent.click(summary);
+  expect(prose).toBeVisible();
   const source = screen.getByText("Opgeslagen modelantwoord · geredigeerd");
   const rawResponse = source.closest("details")?.querySelector("pre");
   expect(rawResponse?.textContent).toBe(raw);
@@ -161,7 +167,7 @@ test("unknown costs and partial token usage stay unavailable", async () => {
   );
 });
 
-test("index statements get a copyable SQL block and recorded warnings stay visible", () => {
+test("the structured AI explanation opens on demand and index recommendations stay off the results page", async () => {
   render(
     <AttemptPanels
       attempt={attempt({
@@ -181,8 +187,13 @@ test("index statements get a copyable SQL block and recorded warnings stay visib
       })}
     />,
   );
-  const code = screen.getByRole("region", { name: "Indexvoorstel · SQL" });
-  expect(code).toHaveTextContent("CREATE INDEX");
-  expect(code.querySelectorAll(".sql-line").length).toBeGreaterThan(1);
-  expect(screen.getByText(/schrijfoverhead/)).toBeVisible();
+  expect(screen.getByText("Extra sortering")).not.toBeVisible();
+  await userEvent.click(
+    screen.getByText("Wat is veranderd en waarom?", { exact: true }),
+  );
+  expect(screen.getByText("Extra sortering")).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "Index recommendations" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText(/schrijfoverhead/)).not.toBeInTheDocument();
 });

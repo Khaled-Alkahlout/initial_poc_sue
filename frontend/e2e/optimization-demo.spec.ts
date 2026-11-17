@@ -33,10 +33,16 @@ test("historische demo toont echte benchmark, SQL-diff en clipboard op desktop e
     name: "Optimized SQL Query",
   });
   const outcome = page.getByRole("region", { name: "Optimization Results" });
-  await expect(original).toBeVisible();
+  await expect(original).toBeVisible({ timeout: 15000 });
   await expect(optimized).toBeVisible();
   await expect(outcome.getByText("Passed", { exact: true })).toBeVisible();
   await expect(outcome.getByText("Gevalideerde verbetering")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Request beoordelen" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Geen vergelijkbare prestatiemeting beschikbaar/),
+  ).toHaveCount(0);
 
   const originalBox = await original.boundingBox();
   const optimizedBox = await optimized.boundingBox();

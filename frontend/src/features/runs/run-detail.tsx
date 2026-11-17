@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { Attempt, Run, SystemStatus } from "@/lib/api/contracts";
+import { compareBenchmark } from "@/lib/benchmark";
 import { conditionLabels, count, dateTime } from "@/lib/formatters";
 import { useApi } from "@/hooks/use-api";
 import { PageHeader } from "@/components/shared/page-header";
@@ -62,6 +63,7 @@ export function RunDetail({
   if (!run) return <LoadingState />;
   const attempt =
     run.attempts.find(({ id }) => id === attemptId) ?? run.attempts[0];
+  const measured = validation ?? attempt;
   const historical = run.mode === "historical" || run.mode === "replay";
   const analysisStages = attempt?.stages.length ? attempt.stages : run.stages;
   const stages = analysisStages.map((stage) =>
@@ -140,7 +142,6 @@ export function RunDetail({
           )}
         </div>
       </Card>
-      <FeedbackForm targetId={run.id} targetType="run" />
     </>
   );
 
@@ -282,11 +283,16 @@ export function RunDetail({
               label="SQL-fixture"
             />
           )}
-          <TechnicalDetails description="Runmetadata en review">
+          <TechnicalDetails description="Runmetadata">
             {details}
           </TechnicalDetails>
         </>
       )}
+      <FeedbackForm
+        targetId={run.id}
+        targetType="run"
+        showBenchmarkWarning={!measured || !compareBenchmark(measured)}
+      />
       {run.mode === "analysis" && run.lifecycle === "FAILED" && (
         <RetryAnalysis run={run} />
       )}

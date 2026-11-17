@@ -7,7 +7,8 @@ import { FeedbackForm } from "@/components/evaluation/feedback-form";
 import { OutcomeBadge } from "@/components/shared/status";
 import { AppShell } from "@/components/layout/app-shell";
 import { StartRun } from "@/features/runs/start-run";
-import { query, run, system } from "./fixtures";
+import { RunDetail } from "@/features/runs/run-detail";
+import { attempt, query, run, system } from "./fixtures";
 
 const { push, refresh } = vi.hoisted(() => ({
   push: vi.fn(),
@@ -61,6 +62,60 @@ describe("review en navigatie", () => {
     expect(
       await screen.findByText("Incorrect", { selector: "span" }),
     ).toBeInTheDocument();
+  });
+  test("een request zonder benchmark kan een handmatige review krijgen", async () => {
+    const user = userEvent.setup();
+    const latest = {
+      ...run(),
+      mode: "analysis" as const,
+      attempts: [
+        attempt({
+          correctness: "skipped",
+          proposed_sql: null,
+          outcome: "inconclusive",
+          benchmark: {
+            ...attempt().benchmark,
+            status: "skipped",
+            original_ms: null,
+            proposed_ms: null,
+          },
+        }),
+      ],
+    };
+    const feedback = {
+      id: "feedback",
+      target_type: "run" as const,
+      target_id: latest.id,
+      label: "needs_review" as const,
+      comment: "Het antwoord vraagt om extra context.",
+      reviewer: "",
+      created_at: "2026-11-02T12:00:00Z",
+    };
+    vi.spyOn(api, "getRun").mockResolvedValue(latest);
+    vi.spyOn(api, "getFeedback")
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([feedback]);
+    const submit = vi.spyOn(api, "submitFeedback").mockResolvedValue(feedback);
+    render(<RunDetail initial={latest} system={system()} inline />);
+
+    expect(
+      screen.getByRole("heading", { name: "Request beoordelen" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/Geen vergelijkbare prestatiemeting beschikbaar/),
+    ).toBeVisible();
+    await user.type(
+      screen.getByLabelText("Toelichting · optioneel"),
+      feedback.comment,
+    );
+    await user.click(screen.getByRole("button", { name: "Review opslaan" }));
+    expect(
+      await screen.findByText(feedback.comment, { exact: true }),
+    ).toBeVisible();
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ target_id: latest.id, target_type: "run" }),
+    );
+    expect(screen.getByText("Not benchmarked")).toBeVisible();
   });
   test("centrale navigatie scheidt POC van Development en ondersteunt themawisseling", async () => {
     const user = userEvent.setup();

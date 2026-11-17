@@ -1607,7 +1607,6 @@ td a:hover,
   gap: 18px 28px;
 }
 .explanation-grid p,
-.index-advice p,
 .advice-list {
   color: var(--muted);
   font-size: 13px;
@@ -1630,20 +1629,6 @@ td a:hover,
 }
 .advice-list > li + li {
   margin-top: 4px;
-}
-.index-advice {
-  list-style: none;
-  display: grid;
-  gap: 12px;
-}
-.index-advice > li {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-}
-.index-advice > li + li {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
 }
 .evidence-grid {
   display: grid;

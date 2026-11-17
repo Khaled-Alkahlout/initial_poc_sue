@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useState } from "react";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, TriangleAlert } from "lucide-react";
 import { api, errorMessage } from "@/lib/api/client";
 import type { FeedbackInput } from "@/lib/api/contracts";
 import { useApi } from "@/hooks/use-api";
@@ -18,9 +18,11 @@ const labels = {
 export function FeedbackForm({
   targetId,
   targetType,
+  showBenchmarkWarning = false,
 }: {
   targetId: string;
   targetType: FeedbackInput["target_type"];
+  showBenchmarkWarning?: boolean;
 }) {
   const loader = useCallback(() => api.getFeedback(targetId), [targetId]);
   const { data, error, refresh } = useApi(loader);
@@ -57,11 +59,22 @@ export function FeedbackForm({
   return (
     <Card>
       <CardHeader
-        title="Ontwikkelaarsreview"
-        description="Een afzonderlijk oordeel van een reviewer; geen wijziging van metingen en geen feedback naar het model."
+        title={
+          targetType === "run" ? "Request beoordelen" : "Ontwikkelaarsreview"
+        }
+        description="Leg je handmatige oordeel vast."
         action={<MessageSquare size={17} className="muted" />}
       />
       <div className="panel-body">
+        {showBenchmarkWarning && (
+          <p className="notice notice-amber mb-4">
+            <TriangleAlert size={16} aria-hidden="true" />
+            <span>
+              Geen vergelijkbare prestatiemeting beschikbaar. Je kunt het
+              request handmatig beoordelen.
+            </span>
+          </p>
+        )}
         <form onSubmit={submit} className="form-grid !mt-0">
           <div className="grid-two">
             <label className="field">

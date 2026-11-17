@@ -17,7 +17,7 @@ const indexDialect = {
     ],
   },
 };
-export const indexStatement = /^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b/i;
+const indexStatement = /^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b/i;
 const parameter = /%(?:\([^()\r\n]+\))?[sbt]\b/;
 const dollarString = /(\$(?:[a-zA-Z_]\w*)?\$)[\s\S]*?\1/;
 const quotedString = /(?:[eE]'(?:\\[\s\S]|''|[^'\\])*'|'(?:''|[^'])*')/;

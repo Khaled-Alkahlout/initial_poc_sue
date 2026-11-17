@@ -45,7 +45,6 @@ test("POC demo: query inspecteren, replay starten en review bewaren", async ({
   await expect(
     page.getByRole("region", { name: "Optimization Results" }),
   ).toBeVisible();
-  await page.getByText("Technical Details", { exact: true }).click();
   await page.getByLabel("Reviewlabel").selectOption("incorrect");
   await page
     .getByLabel("Toelichting · optioneel")
@@ -55,12 +54,46 @@ test("POC demo: query inspecteren, replay starten en review bewaren", async ({
     page.getByRole("status").filter({ hasText: "Review opgeslagen" }),
   ).toContainText("technische uitslag blijft ongewijzigd");
   await page.reload();
-  await page.getByText("Technical Details", { exact: true }).click();
   await expect(
     page.getByText("E2E review: controleer de semantische aannames."),
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Optimization Results" }),
+  ).toBeVisible();
+});
+
+test("een offline request krijgt een opgeslagen beoordeling zonder prestatiemeting", async ({
+  page,
+}) => {
+  await page.goto("/queries/top_products");
+  await page.getByRole("button", { name: "POC starten" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("combobox", { name: "Uitvoermodus" })
+    .selectOption("mock");
+  await dialog.getByRole("button", { name: "Run starten" }).click();
+  await expect(page).toHaveURL(/\/runs\/[a-f0-9-]+$/);
+  await expect(page.getByText("Afgerond", { exact: true })).toBeVisible({
+    timeout: 30000,
+  });
+  await expect(
+    page.getByText("Not benchmarked", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Request beoordelen" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Geen vergelijkbare prestatiemeting beschikbaar/),
+  ).toBeVisible();
+
+  const comment = "Handmatige beoordeling zonder benchmark.";
+  await page.getByLabel("Toelichting · optioneel").fill(comment);
+  await page.getByRole("button", { name: "Review opslaan" }).click();
+  await expect(page.getByText(comment, { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(comment, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Not benchmarked", { exact: true }),
   ).toBeVisible();
 });
 

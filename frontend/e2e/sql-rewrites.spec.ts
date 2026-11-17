@@ -114,8 +114,24 @@ test("top_products: no rewrite, focused candidate and SQL display", async ({
       exact: true,
     }),
   ).toBeVisible();
+  const explanation = workspace.getByText("Wat is veranderd en waarom?", {
+    exact: true,
+  });
+  const rootCause = workspace.getByText(
+    "Intermediate rows and DISTINCT sorting",
+    { exact: true },
+  );
+  await expect(rootCause).toBeHidden();
+  await explanation.click();
+  await expect(rootCause).toBeVisible();
   await expect(
     workspace.getByText("Review order_lines(order_id)", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    workspace.getByRole("heading", { name: "Request beoordelen" }),
+  ).toBeVisible();
+  await expect(
+    workspace.getByText(/Geen vergelijkbare prestatiemeting beschikbaar/),
   ).toBeVisible();
   await workspace
     .getByRole("button", { name: "Generate SQL Rewrite", exact: true })

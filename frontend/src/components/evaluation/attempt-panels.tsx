@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import type { Attempt } from "@/lib/api/contracts";
 import { count, conditionLabels } from "@/lib/formatters";
 import { benchmarkTime } from "@/lib/benchmark";
-import { indexStatement } from "@/lib/sql";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge, SourceBadge, StatusBadge } from "@/components/shared/status";
 import { JsonInspector } from "@/components/shared/json-inspector";
@@ -87,6 +86,7 @@ function AdviceList({ values }: { values: string[] }) {
 }
 
 function Explanation({ attempt }: { attempt: Attempt }) {
+  const title = "Wat is veranderd en waarom?";
   const analysis = attempt.analysis;
   if (!analysis) {
     const explanation = attempt.explanation
@@ -98,20 +98,17 @@ function Explanation({ attempt }: { attempt: Attempt }) {
           paragraph && !/^(?:SELECT|WITH|CREATE|EXPLAIN)\b/i.test(paragraph),
       );
     return (
-      <Card>
-        <CardHeader
-          title="What changed and why?"
-          action={
-            explanation && <Badge tone="brand">Opgeslagen modeluitleg</Badge>
-          }
-        />
-        <div className="panel-body">
-          <p className="muted text-sm legacy-explanation">
-            {explanation ??
-              "Voor deze poging is geen afzonderlijke modeltoelichting opgeslagen."}
-          </p>
-        </div>
-      </Card>
+      <TechnicalDetails title={title}>
+        {explanation && (
+          <div>
+            <Badge tone="brand">Opgeslagen modeluitleg</Badge>
+          </div>
+        )}
+        <p className="muted text-sm legacy-explanation">
+          {explanation ??
+            "Voor deze poging is geen afzonderlijke modeltoelichting opgeslagen."}
+        </p>
+      </TechnicalDetails>
     );
   }
   const points = [
@@ -124,12 +121,11 @@ function Explanation({ attempt }: { attempt: Attempt }) {
     ["Onzekerheid", analysis.uncertainty],
   ];
   return (
-    <Card>
-      <CardHeader
-        title="What changed and why?"
-        action={<Badge tone="brand">AI-uitleg</Badge>}
-      />
-      <div className="panel-body explanation-grid">
+    <TechnicalDetails title={title}>
+      <div>
+        <Badge tone="brand">AI-uitleg</Badge>
+      </div>
+      <div className="explanation-grid">
         {points.map(([title, value]) => (
           <div key={title}>
             <h3>{title}</h3>
@@ -143,43 +139,7 @@ function Explanation({ attempt }: { attempt: Attempt }) {
           </div>
         )}
       </div>
-    </Card>
-  );
-}
-
-function IndexRecommendations({
-  recommendations,
-}: {
-  recommendations: string[];
-}) {
-  if (!recommendations.length) return null;
-  const markdownCode =
-    /(```(?:sql|postgresql)?[ \t]*\r?\n[\s\S]*?\r?\n```|`[^`\r\n]+`)/gi;
-  return (
-    <Card>
-      <CardHeader
-        title="Index recommendations"
-        description="Indexadvies voor handmatige review. Uitvoering en metingen voor deze indexvoorstellen zijn niet beschikbaar."
-        action={<Badge tone="brand">AI-advies</Badge>}
-      />
-      <ul className="panel-body index-advice">
-        {recommendations.map((recommendation, index) => (
-          <li key={index}>
-            {recommendation.split(markdownCode).map((part, block) => {
-              if (!part.trim()) return null;
-              const sql = part
-                .replace(/^```(?:sql|postgresql)?[ \t]*\r?\n|\r?\n```$/gi, "")
-                .replace(/^`|`$/g, "");
-              return indexStatement.test(sql) ? (
-                <SqlViewer key={block} sql={sql} title="Indexvoorstel · SQL" />
-              ) : (
-                <p key={block}>{part}</p>
-              );
-            })}
-          </li>
-        ))}
-      </ul>
-    </Card>
+    </TechnicalDetails>
   );
 }
 
@@ -201,9 +161,6 @@ export function AttemptPanels({
       <RewriteSummary attempt={attempt} measured={measured} />
       <Explanation attempt={attempt} />
       <OptimizationResults attempt={measured} action={validationAction} />
-      <IndexRecommendations
-        recommendations={analysis?.index_recommendations ?? []}
-      />
       <TechnicalDetails description="Model, tokens, kosten, execution plans en diagnostiek">
         <AIUsage attempt={attempt} />
         {attempt.context.length > 0 && <ContextViewer attempt={attempt} />}

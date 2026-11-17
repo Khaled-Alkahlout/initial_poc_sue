@@ -36,7 +36,7 @@ toont het model, de beschikbare tokens, de brongegevens en eventuele kosten.
 De workload in het overzicht is gesimuleerd. De benchmark in deze demo komt
 uit een opgeslagen testmeting. Live AI-analyse en validatie op een bevestigde
 testdatabase hebben elk hun eigen configuratie en bevestiging.
-Indexadvies is beschikbaar voor handmatige review.
+Via **Request beoordelen** kun je ook zonder prestatiemeting een review opslaan.
 
 De querylijst leest het optionele veld `has_proposal` in de API. Dit veld geeft
 aan of er al SQL is opgeslagen bij een AI-poging voor die query.
