@@ -10,6 +10,7 @@ import { PerformanceComparison } from "@/components/evaluation/optimization-resu
 import { TestMatrix } from "@/components/evaluation/test-matrix";
 import { EmptyState, ErrorState } from "@/components/shared/states";
 import { ArchitectureView } from "@/features/development/architecture";
+import { api } from "@/lib/api/client";
 import { attempt, query, stage, system, testRecord } from "./fixtures";
 
 describe("Queryweergave", () => {
@@ -176,10 +177,31 @@ describe("Development en fouttoestanden", () => {
         }}
       />,
     );
-    expect(screen.getAllByText("Niet getest")).toHaveLength(2);
+    expect(screen.getByText("Verbinding nog niet getest.")).toBeVisible();
+    expect(screen.queryByText("Geslaagd")).not.toBeInTheDocument();
+  });
+  test("databasecheck toont een geslaagde verbinding en geweigerde tabeltoegang", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "checkDatabase").mockResolvedValue({
+      connection: {
+        status: "passed",
+        message: "PostgreSQL heeft SELECT 1 uitgevoerd.",
+      },
+      tables: {
+        status: "failed",
+        message: "De databaserol mist SELECT-rechten.",
+      },
+    });
+    render(<ArchitectureView system={system()} />);
+    await user.click(
+      screen.getByRole("button", { name: "Databaseverbinding testen" }),
+    );
+    const checks = within(screen.getByRole("status"));
+    expect(checks.getByText("Geslaagd")).toBeVisible();
+    expect(checks.getByText("Mislukt")).toBeVisible();
     expect(
-      screen.getByText("Configuratie aanwezig; geen verbinding geopend"),
-    ).toBeInTheDocument();
+      checks.getByText("De databaserol mist SELECT-rechten."),
+    ).toBeVisible();
   });
   test("lege en mislukte verzoeken hebben expliciete toestanden", async () => {
     const user = userEvent.setup();

@@ -33,7 +33,7 @@ def original(name: str) -> str:
     return (HERE / "original" / f"{name}.sql").read_text()
 
 
-def make_ctx(conn) -> dict:
+def make_ctx(conn, *, recent_order_limit: int | None = None) -> dict:
     """
     Derive the parameter building blocks from the database itself: a big and a small tenant and four time windows.
 
@@ -41,6 +41,8 @@ def make_ctx(conn) -> dict:
     ----------
     conn : psycopg.Connection
         Open connection to the database that contains the seeded data.
+    recent_order_limit : int | None
+        Limit the dashboard profile to recent orders and the time windows they cover.
 
     Returns
     -------
@@ -48,14 +50,41 @@ def make_ctx(conn) -> dict:
         Context with the keys "big" and "small" (tenant ids) and "windows", a mapping
         ``tenant_id -> {"full", "recent", "empty", "boundary" -> (from, to)}``.
     """
-    big, small = (conn.execute(
-        "SELECT tenant_id FROM orders GROUP BY 1 ORDER BY count(*) {} LIMIT 1".format(d)).fetchone()[0] for d in ("DESC", "ASC"))
+    order_limit = (
+        "ORDER BY created_at DESC LIMIT %s" if recent_order_limit is not None else ""
+    )
+    rows = conn.execute(
+        f"""WITH profile_orders AS (
+               SELECT tenant_id, created_at
+                 FROM public.orders
+                WHERE tenant_id IS NOT NULL AND created_at IS NOT NULL
+                {order_limit}
+           ), tenants AS MATERIALIZED (
+               SELECT tenant_id, count(*) AS orders, min(created_at) AS lo, max(created_at) AS hi
+                 FROM profile_orders
+                GROUP BY tenant_id
+           )
+           (SELECT tenant_id, lo, hi FROM tenants ORDER BY orders DESC, tenant_id DESC LIMIT 1)
+           UNION ALL
+           (SELECT tenant_id, lo, hi FROM tenants ORDER BY orders ASC, tenant_id ASC LIMIT 1)""",
+        (recent_order_limit,) if recent_order_limit is not None else None,
+    ).fetchall()
+    if not rows:
+        raise ValueError("Geen orders beschikbaar om parametersets voor deze casus af te leiden.")
+    big, small = (row[0] for row in rows)
     ctx = {"big": big, "small": small, "windows": {}}
-    for label, t in (("big", big), ("small", small)):
-        lo, hi = conn.execute("SELECT min(created_at), max(created_at) FROM orders WHERE tenant_id=%s", (t,)).fetchone()
+    for t, lo, hi in rows:
+        if recent_order_limit is not None:
+            # Keep the validation queries in the time span used for this profile.
+            latest = hi + timedelta(microseconds=1)
+            full = (lo, latest)
+            recent = (lo + (hi - lo) / 2, latest)
+        else:
+            full = (datetime(2000, 1, 1), datetime(2100, 1, 1))
+            recent = (hi - timedelta(days=90), hi + timedelta(days=1))
         ctx["windows"][t] = {
-            "full": (datetime(2000, 1, 1), datetime(2100, 1, 1)),
-            "recent": (hi - timedelta(days=90), hi + timedelta(days=1)),
+            "full": full,
+            "recent": recent,
             "empty": (datetime(2100, 1, 1), datetime(2101, 1, 1)),
             # bovengrens precies op de laatste order: een '<=' in plaats van '<' valt alleen hier op
             "boundary": (lo, hi),
@@ -293,7 +322,7 @@ def ro_params(ctx):
     list of tuple
         Pairs ``(label, params)``.
     """
-    return [(l, {k: v for k, v in p.items() if k != "limit"}) for l, p in std_params(0)(ctx)]
+    return [(label, {k: v for k, v in p.items() if k != "limit"}) for label, p in std_params(0)(ctx)]
 
 
 def ro_timing(ctx):
@@ -337,7 +366,7 @@ def tc_params(ctx):
         Pairs ``(label, params)`` for four of the eight standard combinations.
     """
     keep = {"big/recent", "big/empty", "small/full", "small/boundary"}  # trage query: beperkte set
-    return [(l, p) for l, p in std_params(100000)(ctx) if l in keep]
+    return [(label, p) for label, p in std_params(100000)(ctx) if label in keep]
 
 
 CASES = [

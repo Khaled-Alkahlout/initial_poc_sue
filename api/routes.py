@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from api.schemas import (
+    DatabaseConnectionTest,
     Feedback,
     FeedbackInput,
     Overview,
@@ -22,11 +23,12 @@ from api.schemas import (
     RewriteDisplay,
 )
 from api.services.artifacts import CASE_MAP
+from api.services.database import check_database
 from api.services.jobs import BusyError
 from api.services.privacy import redact
 from llm.generation import GenerationSettings
 from api.services import ai_settings
-from llm.analysis import AnalysisError
+from llm.analysis import AnalysisError, model_configuration
 from api.services.errors import model_http_error
 
 router = APIRouter(prefix="/api")
@@ -120,10 +122,15 @@ def start_run(value: RunRequest, request: Request):
         except AnalysisError as exc:
             raise HTTPException(422, str(exc)) from None
     config = value.model_dump()
-    if value.mode == "analysis":
-        config["generation_settings"] = (
-            request.app.state.store.generation_settings().model_dump()
-        )
+    if capability.external_model:
+        generation = request.app.state.store.generation_settings()
+        try:
+            _, model, _ = model_configuration(generation)
+        except AnalysisError as exc:
+            raise HTTPException(409, str(exc)) from None
+        config["generation_settings"] = generation.model_copy(
+            update={"model": model}
+        ).model_dump()
     job = enqueue(request, "run", config)
     return catalog.job_run(job)
 
@@ -216,24 +223,34 @@ def system_status(request: Request):
     return request.app.state.catalog.system()
 
 
+@router.post("/system/check-database", response_model=DatabaseConnectionTest)
+def system_check_database():
+    return check_database()
+
+
 @router.post("/system/check-model")
-def check_model():
+def check_model(request: Request):
     from llm.analysis import AnalysisError, check_connection
 
     try:
-        return check_connection()
+        return check_connection(request.app.state.store.generation_settings())
     except AnalysisError as exc:
         raise model_http_error(exc) from None
 
 
 @router.get("/settings/ai")
-def get_ai_settings(request: Request):
+def get_ai_settings(
+    request: Request,
+    model: str | None = Query(default=None, min_length=1, max_length=200),
+):
     try:
         return ai_settings.settings_view(
-            request.app.state.store, request.app.state.catalog.settings
+            request.app.state.store, request.app.state.catalog.settings, model
         )
     except AnalysisError as exc:
         raise model_http_error(exc) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @router.put("/settings/ai", response_model=GenerationSettings)
@@ -263,7 +280,10 @@ def reset_ai_settings(request: Request):
 @router.post("/settings/ai/test")
 def test_ai_generation(value: AIConnectionTest, request: Request):
     try:
-        result = ai_settings.test_generation(request.app.state.catalog.settings)
+        result = ai_settings.test_generation(
+            request.app.state.catalog.settings,
+            request.app.state.store.generation_settings(),
+        )
         if not result["success"] and result.get("diagnostics", {}).get(
             "error_code"
         ) in {"network_or_timeout", "provider_error"}:

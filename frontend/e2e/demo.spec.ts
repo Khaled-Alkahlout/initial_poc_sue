@@ -30,12 +30,16 @@ test("POC demo: query inspecteren, replay starten en review bewaren", async ({
   await expect(
     page.getByRole("heading", { name: "top_products", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "POC starten" }).click();
-  await page
-    .getByRole("combobox", { name: "Uitvoermodus" })
-    .selectOption("replay");
-  await page.getByRole("button", { name: "Replay starten" }).click();
-  await expect(page).toHaveURL(/\/runs\/[a-f0-9-]+$/);
+  const response = await page.request.post("/api/runs", {
+    data: {
+      mode: "replay",
+      query_id: "top_products",
+      condition: "C2_schema",
+    },
+  });
+  expect(response.status()).toBe(202);
+  const replay = await response.json();
+  await page.goto(`/runs/${replay.id}`);
   await expect(page.getByText("Afgerond", { exact: true })).toBeVisible({
     timeout: 30000,
   });
@@ -65,14 +69,16 @@ test("POC demo: query inspecteren, replay starten en review bewaren", async ({
 test("een offline request krijgt een opgeslagen beoordeling zonder prestatiemeting", async ({
   page,
 }) => {
-  await page.goto("/queries/top_products");
-  await page.getByRole("button", { name: "POC starten" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog
-    .getByRole("combobox", { name: "Uitvoermodus" })
-    .selectOption("mock");
-  await dialog.getByRole("button", { name: "Run starten" }).click();
-  await expect(page).toHaveURL(/\/runs\/[a-f0-9-]+$/);
+  const response = await page.request.post("/api/runs", {
+    data: {
+      mode: "mock",
+      query_id: "top_products",
+      condition: "C1_query",
+    },
+  });
+  expect(response.status()).toBe(202);
+  const run = await response.json();
+  await page.goto(`/runs/${run.id}`);
   await expect(page.getByText("Afgerond", { exact: true })).toBeVisible({
     timeout: 30000,
   });

@@ -61,9 +61,8 @@ npm start
 2. Open **Query Explorer**: sorteer, zoek, wijzig het weergavebudget en bekijk
    de redencodes bij een query. Workloadcijfers zijn expliciet fictief.
 3. Open `top_products`: SQL, metrics, selectie en opgeslagen context.
-4. Klik **POC starten**, kies **Historische replay** en een contextconditie.
-5. De nieuwe run gaat van wachtrij naar voltooid. Inspecteer SQL naast elkaar,
-   fases en historische benchmark. Er wordt niets opnieuw gemeten.
+4. Open **Analysehistorie** en kies een historische run.
+5. Inspecteer SQL naast elkaar, fases en de opgeslagen benchmark.
 6. Sla een ontwikkelaarsreview op. Herladen toont de review nog steeds; de
    technische conclusie blijft hetzelfde.
 7. Open **Development → Tests & evaluatie**. Inspecteer bijvoorbeeld de gemiste
@@ -87,6 +86,7 @@ uitgevoerd. C1 is de enige beschikbare contextconditie voor deze modus.
 | `SUE_DATABASE_URL`              | Alleen server-side DSN van de testdatabase                      |
 | `SUE_ENABLE_LLM=1`              | Externe modelgeneratie expliciet aanbieden                      |
 | `SUE_MODEL`                     | Expliciet gekozen provider-model-ID                             |
+| `SUE_ALLOWED_MODELS`            | Extra OpenRouter-ID's voor AI Settings, kommagescheiden        |
 | `ANTHROPIC_API_KEY`             | Alleen server-side modelcredential                              |
 | `OPENROUTER_API_KEY`            | Server-side OpenRouter-key voor nieuwe analyses                 |
 | `SUE_LLM_PROVIDER`              | `openrouter` of expliciet `anthropic` voor legacy-direct        |
@@ -99,24 +99,21 @@ bevatten geen werkende credentials; echte `.env`-bestanden worden genegeerd.
 
 ## Optionele testdatabase- en live-operaties
 
-Deze routes zijn geïmplementeerd, maar zijn niet tijdens de dashboardvalidatie
-tegen een echte database/provider uitgevoerd.
-
-1. Bereid de bestaande Bazaar-testdatabase voor volgens de oorspronkelijke
-   README. Voor ingebedde pgserver op Windows blijft Python 3.12 de beschreven
-   compatibele keuze. Een reeds draaiende testdatabase vereist geen pgserver.
-2. Installeer `psycopg[binary]`; voor live generatie ook `anthropic`.
+1. Bereid een geïsoleerde testdatabase voor met het schema van de bestaande
+   casussen. Gebruik voor een kleine lokale proef de synthetische fixture uit
+   het overdrachtspakket. Voor ingebedde pgserver op Windows geldt Python 3.12.
+2. Installeer `psycopg[binary]`. De dashboardclient voor OpenRouter gebruikt `httpx`.
 3. Configureer uitsluitend een geïsoleerde testdatabase, met een beperkte rol.
 4. Zet SQL-enablement, testdoelbevestiging en de server-side DSN vóór API-start.
-5. **Testdatabase · mockmodel** gebruikt bestaande context en evaluate, zonder
-   externe modelcall. SQL-uitvoering moet ook in de browser worden bevestigd.
-6. Voor **Live POC** zijn daarnaast model-enablement, model-ID en key nodig.
-   Bevestig het externe request afzonderlijk. De run genereert precies één
-   voorstel voor één vooraf gedefinieerde case; geen feedbacklus.
+5. **Testdatabase · mockmodel** voert een expliciete A/A-controle uit.
+   Bevestig SQL-uitvoering in de browser.
+6. Voor **AI + databasevalidatie** zijn daarnaast model-enablement, model-ID en
+   OpenRouter-key nodig. Bevestig externe generatie en testuitvoering en start de
+   volledige run.
 
-Alle contextcondities blijven beschikbaar waar hun prerequisites aanwezig zijn.
-C3/C4 voeren `EXPLAIN ANALYZE` uit. De oude CLI-`--dry-run` is dus nog steeds
-geen offline selectie. De nieuwe dashboardreplay en offline mock zijn dat wel.
+Live C3/C4 gebruiken een geschat plan. `--dry-run` bouwt de gevraagde prompts
+en leest bij C2–C4 testdatabasemetadata. Voor offline selectie is er
+`--selection-only`.
 
 ## Tests en checks
 
@@ -128,7 +125,9 @@ Vanuit de repositoryhoofdmap:
 
 Dit omvat bestaande domeintests, API-contracten, artifactparsing, reviewopslag,
 queue/timeout, statusadaptatie en echte lokale replay/mock/testworkers. Alleen
-nieuwe testdatabases in tijdelijke mappen worden geschreven, geen PostgreSQL.
+nieuwe SQLite-opslag in tijdelijke mappen wordt geschreven. Aanvullende
+PostgreSQL-tests vereisen een expliciete synthetische test-DSN.
+[Testopstelling](openrouter.md#testen)
 
 Frontend:
 

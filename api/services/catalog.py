@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from pydantic import ValidationError
 from collections import Counter
 
@@ -23,9 +22,10 @@ from api.schemas import (
     TestExecution,
     TestRecord,
 )
-from api.services.artifacts import Artifacts, CASE_MAP, LIMITATIONS, stage
+from api.services.artifacts import Artifacts, CASE_MAP, LIMITATIONS, RUN_STAGES, stage
 from api.services.storage import Store
 from api.services.errors import StoredResultError
+from api.services.database import database_configuration_error, validation_blocker
 from query_selection.adapters import mock_telemetry
 from query_selection.policy import SelectionPolicy
 from query_selection.selection import select_queries
@@ -89,15 +89,7 @@ class Catalog:
                     or "Taak staat in de wachtrij; fase nog niet uitgevoerd.",
                     "current",
                 )
-                for key in (
-                    "selection",
-                    "context",
-                    "generation",
-                    "static",
-                    "correctness",
-                    "benchmark",
-                    "result",
-                )
+                for key in RUN_STAGES
             ],
             error=job["error"],
             limitations=LIMITATIONS,
@@ -213,26 +205,20 @@ class Catalog:
             name: importlib.util.find_spec(name) is not None
             for name in ("sqlglot", "psycopg", "anthropic")
         }
-        database = bool(os.getenv("SUE_DATABASE_URL"))
-        from llm.analysis import configuration, AnalysisError
+        database = database_configuration_error() is None
+        from llm.analysis import model_configuration, AnalysisError
 
         provider, model_name, error = None, None, None
         try:
-            provider, model_name, key = configuration()
+            provider, model_name, key = model_configuration(
+                self.store.generation_settings()
+            )
             model = bool(key)
         except AnalysisError as exc:
             model, error = False, str(exc)
-        sql_ready = (
-            self.settings.enable_sql
-            and self.settings.test_database_confirmed
-            and database
-            and dependencies["psycopg"]
-        )
-        llm_ready = (
-            self.settings.enable_llm
-            and model
-            and (provider == "openrouter" or dependencies["anthropic"])
-        )
+        sql_blocker = validation_blocker(self.settings)
+        sql_ready = not sql_blocker
+        llm_ready = self.settings.enable_llm and model and provider == "openrouter"
         missing = []
         if not self.settings.enable_llm:
             missing.append("SUE_ENABLE_LLM=1")
@@ -240,21 +226,28 @@ class Catalog:
             missing.append(
                 "OPENROUTER_API_KEY" if provider == "openrouter" else "providerkey"
             )
-        if provider == "anthropic" and not dependencies["anthropic"]:
-            missing.append("Anthropic SDK")
+        if provider == "anthropic":
+            missing.append("OpenRouter voor gestructureerde dashboardanalyse")
         llm_reason = error or (
             "Echte AI-analyse via "
             + str(provider)
-            + "; geen database nodig. SQL-validatie is een afzonderlijke stap."
+            + ". SQL-validatie is een afzonderlijke stap voor deze modus."
             if llm_ready
             else "AI-analyse nog niet beschikbaar. Vereist: "
             + ", ".join(missing)
             + ". Werk .env bij en herstart de Python-API."
         )
         sql_reason = (
-            "Alleen vooraf gedefinieerde cases op de expliciet bevestigde testdatabase; verbinding niet vooraf getest."
-            if sql_ready
-            else "Vereist SUE_ENABLE_SQL_RUNS=1, SUE_TEST_DATABASE_CONFIRMED=1, server-side databaseconfiguratie en psycopg."
+            sql_blocker
+            or "SQL-uitvoering is ingesteld voor de geïsoleerde testdatabase."
+        )
+        live_reason = (
+            " ".join(
+                reason
+                for ready, reason in ((llm_ready, llm_reason), (sql_ready, sql_reason))
+                if not ready
+            )
+            or "De worker controleert de testdatabase vóór de AI-aanroep."
         )
         return SystemStatus(
             provider=provider,
@@ -272,7 +265,7 @@ class Catalog:
             run_modes=[
                 Capability(
                     id="analysis",
-                    label="Live POC · echt AI-advies (zonder database)",
+                    label="AI-analyse zonder database",
                     available=llm_ready,
                     reason=llm_reason,
                     external_model=True,
@@ -305,9 +298,9 @@ class Catalog:
                 ),
                 Capability(
                     id="live",
-                    label="AI + databasevalidatie · experimenteel",
+                    label="Live POC",
                     available=llm_ready and sql_ready,
-                    reason=sql_reason + " " + llm_reason,
+                    reason=live_reason,
                     executes_sql=True,
                     external_model=True,
                 ),

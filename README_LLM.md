@@ -7,9 +7,9 @@ en een foute of nutteloze. Elke LLM-uitvoer gaat door hetzelfde framework als `r
 
 - `llm/context.py`: bouwt de context uit de database (read-only). Vier cumulatieve condities:
   - `C1_query`: alleen de originele query
-  - `C2_schema`: + kolommen, constraints en indexen van de gebruikte tabellen
-  - `C3_plan`: + `EXPLAIN (ANALYZE, BUFFERS)` van het origineel op de timing-parameters
-  - `C4_stats`: + rijen per tabel en `pg_stats` (null_frac, n_distinct, correlation, meest voorkomende waarden)
+  - `C2_schema`: + kolommen, nullability en indexmetadata van de gebruikte tabellen
+  - `C3_plan`: + beperkt geschat `EXPLAIN (FORMAT JSON)`-plan zonder predicates
+  - `C4_stats`: + geschatte rijen per tabel, null_frac en n_distinct
 - `llm/client.py`: systeemprompt, prompt opbouwen, Anthropic API aanroepen, SQL uit het antwoord halen
 - `scripts/run_llm.py`: voert alles uit en beoordeelt elke herschrijving met `evaluate()` uit `run_validation.py`
 
@@ -28,7 +28,7 @@ Zet de sleutel nooit in een bestand dat in git komt.
 
 1. Prompts bekijken, zonder API en zonder kosten:
    `python scripts/run_llm.py "<URI>" --dry-run`
-2. A/A-controle: de "LLM" geeft het origineel ongewijzigd terug. Elke `ACCEPTED` hier is meetruis.
+2. A/A-controle: het model wordt gesimuleerd en geeft het origineel terug. De meting toont de variatie. Een identieke query komt niet in aanmerking voor goedkeuring.
    `python scripts/run_llm.py "<URI>" --model mock --reps 1`
 3. Echte run (4 query's x 4 condities x 3 = 48 API-aanroepen):
    `python scripts/run_llm.py "<URI>" --model claude-sonnet-5-5 --reps 3`
@@ -44,8 +44,7 @@ gelijk maar niet sneller waren, of zijn geaccepteerd.
 
 ## Bekende beperkingen
 
-- `top_customers` duurt ongeveer 8 s per uitvoering. C3/C4 doen voor die query een extra `EXPLAIN ANALYZE`.
+- De nieuwe validator stopt trage of grote proeven bij de tijd- of rijlimiet. Zie [testdatabase en beslisregels](docs/openrouter.md).
 - De condities zijn cumulatief. Het effect van bijvoorbeeld alleen statistieken zonder plan wordt dus niet apart gemeten.
 - Het framework kent geen "trager"-oordeel: een kandidaat met speedup < 1 heet `EQUIVALENT_NOT_FASTER`.
-- In een A/A-test op synthetische data gaf een ongewijzigde query bij 3 tijdmetingen 2 van de 16 keer
-  `ACCEPTED`, en bij 7 metingen 1 van de 32 keer. Draai stap 2 daarom ook op de echte data.
+- Bij oudere experimenten leidden schommelingen in A/A-metingen soms tot `ACCEPTED`.

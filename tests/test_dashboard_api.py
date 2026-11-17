@@ -1,14 +1,28 @@
 import os
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 from api.app import create_app
 from api.config import ROOT, Settings
 from api.schemas import Overview, QueryCollection, RunDetail, SystemStatus
+from api.services.database import TestDatabaseError
+
+
+RDS_ENV = {
+    "SUE_DATABASE_URL": "",
+    "ENDPOINT": "fixture.example",
+    "PORT": "5432",
+    "DB_NAME": "fixture",
+    "DB_USER": "reader",
+    "DB_PASS": "fixture-password @:/ with symbols",
+    "PGSSLROOTCERT": ".local/fixture-ca.pem",
+}
 
 
 class DashboardApiTests(unittest.TestCase):
@@ -147,6 +161,59 @@ class DashboardApiTests(unittest.TestCase):
             self.assertNotIn("never-expose-this", response.text)
             self.assertNotIn("sk-ant-do-not-display", response.text)
             self.assertTrue(response.json()["database_configured"])
+
+    def test_rds_database_name_is_required_before_checking_connection(self):
+        with patch.dict(os.environ, {**RDS_ENV, "DB_NAME": ""}):
+            system = self.client.get("/api/system/status").json()
+            response = self.client.post("/api/system/check-database")
+        self.assertFalse(system["database_configured"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["connection"]["status"], "failed")
+        self.assertIn("DB_NAME", response.json()["connection"]["message"])
+        self.assertEqual(response.json()["tables"]["status"], "skipped")
+        self.assertNotIn(RDS_ENV["DB_PASS"], response.text)
+
+    def test_check_database_uses_rds_tls_and_reports_table_access_separately(self):
+        connect = MagicMock()
+        connection = connect.return_value.__enter__.return_value
+        with (
+            patch.dict(os.environ, RDS_ENV),
+            patch.dict(
+                sys.modules, {"psycopg": SimpleNamespace(connect=connect, Error=RuntimeError)}
+            ),
+            patch("api.services.database._check_case_tables") as check_tables,
+        ):
+            passed = self.client.post("/api/system/check-database")
+            check_tables.side_effect = TestDatabaseError("Casustabellen ontbreken.")
+            inaccessible = self.client.post("/api/system/check-database")
+
+        options = connect.call_args.kwargs
+        self.assertEqual(options["host"], RDS_ENV["ENDPOINT"])
+        self.assertEqual(options["dbname"], RDS_ENV["DB_NAME"])
+        self.assertEqual(options["password"], RDS_ENV["DB_PASS"])
+        self.assertEqual(options["sslmode"], "verify-full")
+        self.assertEqual(options["sslrootcert"], str(ROOT / RDS_ENV["PGSSLROOTCERT"]))
+        self.assertIn("default_transaction_read_only=on", options["options"])
+        connection.execute.assert_any_call("SELECT 1")
+        self.assertIn("orders", check_tables.call_args.args[1])
+        self.assertEqual(passed.json()["tables"]["status"], "passed")
+        self.assertEqual(inaccessible.json()["connection"]["status"], "passed")
+        self.assertEqual(inaccessible.json()["tables"]["status"], "failed")
+        self.assertEqual(inaccessible.json()["tables"]["message"], "Casustabellen ontbreken.")
+
+    def test_check_database_sanitizes_authentication_failure(self):
+        failure = RuntimeError(f"password authentication failed: {RDS_ENV['DB_PASS']}")
+        driver = SimpleNamespace(connect=MagicMock(side_effect=failure), Error=RuntimeError)
+        with (
+            patch.dict(os.environ, RDS_ENV),
+            patch.dict(sys.modules, {"psycopg": driver}),
+            self.assertLogs("sue.api", level="WARNING") as logs,
+        ):
+            response = self.client.post("/api/system/check-database")
+        self.assertEqual(response.json()["connection"]["status"], "failed")
+        self.assertEqual(response.json()["tables"]["status"], "skipped")
+        self.assertIn("code=authentication", " ".join(logs.output))
+        self.assertNotIn(RDS_ENV["DB_PASS"], response.text + " ".join(logs.output))
 
     def test_feedback_persists_separately_and_does_not_modify_result(self):
         target = "validation-20261027-195356~0"

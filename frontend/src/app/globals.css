@@ -703,9 +703,12 @@ td a:hover,
 }
 .pipeline-compact {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--pipeline-columns, 7), minmax(0, 1fr));
   gap: 9px;
   padding: 18px 22px 22px;
+}
+.pipeline-compact:has(> li:nth-child(8)) {
+  --pipeline-columns: 8;
 }
 .pipeline-compact > li {
   min-width: 0;

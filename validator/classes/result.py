@@ -21,3 +21,4 @@ class Result:
     columns: list[str]
     rows: list[tuple]
     ms: float
+    types: list[int] | None = None

@@ -1,78 +1,44 @@
-"""Herhaalde tijdmeting, om en om (ABAB) zodat caching en drift beide kanten even raken."""
-from __future__ import annotations
+"""Paired measurements in the correctness snapshot."""
 
-import statistics
+from statistics import median, quantiles
 
 from validator.checker import run_query
 
-TIMEOUT_MS = 120000
-SPEEDUP_THRESHOLD = 1.2  # een voorstel telt pas als 'sneller' vanaf 20% winst op de mediaan
+BENCHMARK_TIMEOUT_MS = 500
+SPEEDUP_THRESHOLD = 1.2
+DEFAULT_REPETITIONS = 6
 
 
-def measure(conn, orig_sql: str, cand_sql: str, params: dict, reps: int = 7, warmup: int = 2) -> dict:
-    """
-    Measure the speed of a candidate against the original with alternating repetitions.
-
-    The original and the candidate are executed in turn (ABAB), so that caching and
-    drift affect both equally. When the original takes longer than 5 seconds the number
-    of repetitions is reduced to at most 3 and the warm-up is skipped.
-
-    Parameters
-    ----------
-    conn : psycopg.Connection
-        Open connection, in autocommit mode.
-    orig_sql : str
-        The original query.
-    cand_sql : str
-        The candidate query.
-    params : dict
-        Parameter values used for all executions.
-    reps : int, default 7
-        Number of timed executions per query.
-    warmup : int, default 2
-        Number of untimed executions per query before measuring.
-
-    Returns
-    -------
-    dict
-        ``orig_median_ms``, ``orig_iqr_ms``, ``cand_median_ms``, ``cand_iqr_ms``,
-        ``speedup`` (original median divided by candidate median), ``faster`` (True when
-        the speedup reaches ``SPEEDUP_THRESHOLD``) and ``reps`` (the repetitions used).
-    """
-    # Trage originelen (>5 s): minder herhalingen en geen warm-up, anders duurt de proef uren.
-    first = run_query(conn, orig_sql, params, timeout_ms=TIMEOUT_MS).ms
-    if first > 5000:
-        reps, warmup = min(reps, 3), 0
-    for _ in range(warmup):
-        run_query(conn, orig_sql, params, timeout_ms=TIMEOUT_MS)
-        run_query(conn, cand_sql, params, timeout_ms=TIMEOUT_MS)
-    a, b = [], []
-    for _ in range(reps):
-        a.append(run_query(conn, orig_sql, params, timeout_ms=TIMEOUT_MS).ms)
-        b.append(run_query(conn, cand_sql, params, timeout_ms=TIMEOUT_MS).ms)
-
-    def iqr(x):
-        """
-        Compute the interquartile range of a list of measurements.
-
-        Parameters
-        ----------
-        x : list of float
-            Measured durations in milliseconds.
-
-        Returns
-        -------
-        float
-            Third quartile minus first quartile.
-        """
-        q = statistics.quantiles(x, n=4)
-        return q[2] - q[0]
-
-    ma, mb = statistics.median(a), statistics.median(b)
+def measure(conn, orig_sql: str, cand_sql: str, params: dict, reps: int) -> dict:
+    """Balance the starting query and measure both with the same binding."""
+    conn.execute(f"SET LOCAL statement_timeout = {BENCHMARK_TIMEOUT_MS}")
+    baseline, rewrite = [], []
+    for index in range(reps):
+        if index % 2 == 0:
+            baseline.append(run_query(conn, orig_sql, params).ms)
+            rewrite.append(run_query(conn, cand_sql, params).ms)
+        else:
+            rewrite.append(run_query(conn, cand_sql, params).ms)
+            baseline.append(run_query(conn, orig_sql, params).ms)
+    original_ms, candidate_ms = median(baseline), median(rewrite)
+    original_low, _, original_high = (
+        quantiles(baseline, method="inclusive") if reps > 1 else (original_ms,) * 3
+    )
+    candidate_low, _, candidate_high = (
+        quantiles(rewrite, method="inclusive") if reps > 1 else (candidate_ms,) * 3
+    )
+    speedup = original_ms / candidate_ms if candidate_ms > 0 else None
     return {
-        "orig_median_ms": round(ma, 1), "orig_iqr_ms": round(iqr(a), 1),
-        "cand_median_ms": round(mb, 1), "cand_iqr_ms": round(iqr(b), 1),
-        "speedup": round(ma / mb, 2) if mb else None,
-        "faster": (ma / mb) >= SPEEDUP_THRESHOLD if mb else False,
+        "orig_median_ms": original_ms,
+        "orig_iqr_ms": original_high - original_low,
+        "cand_median_ms": candidate_ms,
+        "cand_iqr_ms": candidate_high - candidate_low,
+        "speedup": speedup,
+        "faster": (
+            reps >= 4
+            and speedup is not None
+            and speedup >= SPEEDUP_THRESHOLD
+            and original_low >= SPEEDUP_THRESHOLD * candidate_high
+        ),
         "reps": reps,
     }

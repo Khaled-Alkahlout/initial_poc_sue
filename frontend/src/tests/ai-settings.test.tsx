@@ -130,3 +130,33 @@ test("afgekapt antwoord toont waarschuwing en echte reasoningmetadata", () => {
   expect(screen.getByText("496")).toBeInTheDocument();
   expect(screen.getByText("length")).toBeInTheDocument();
 });
+
+test("modelkeuze laadt de mogelijkheden van dat model en slaat die keuze op", async () => {
+  const user = userEvent.setup();
+  const model = "fixture/alternative";
+  const preview = vi.spyOn(api, "getAISettings").mockResolvedValue({
+    ...initial,
+    model,
+    capabilities: { ...initial.capabilities!, reasoning_efforts: ["xhigh"] },
+  });
+  const save = vi.spyOn(api, "saveAISettings").mockResolvedValue({
+    ...initial.settings,
+    model,
+    reasoning_effort: "xhigh",
+  });
+  render(
+    <AISettingsPage initial={{ ...initial, models: [initial.model, model] }} />,
+  );
+  await user.selectOptions(
+    screen.getByLabelText("Model voor nieuwe aanvragen"),
+    model,
+  );
+  await waitFor(() => expect(preview).toHaveBeenCalledWith(model));
+  await user.selectOptions(screen.getByLabelText("Reasoning effort"), "xhigh");
+  await user.click(
+    screen.getByRole("button", { name: "Instellingen opslaan" }),
+  );
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({ model, reasoning_effort: "xhigh" }),
+  );
+});

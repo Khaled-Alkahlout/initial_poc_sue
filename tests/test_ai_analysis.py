@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from api.app import create_app
 from api.config import Settings, ROOT
 from api.schemas import RunDetail
-from api.services.analysis import execute_analysis
+from api.services.analysis import CASE_MAP, execute_analysis
 from api.services.jobs import BusyError
 from api.services.storage import Store
 from api.services.sql_safety import proposal_check
@@ -46,6 +46,10 @@ DOCUMENT = dict(
     validation_recommendations=["Test dezelfde parameters."],
     missing_context=["Actuele indexen en plan."],
 )
+WORKFLOW_DOCUMENT = {
+    **DOCUMENT,
+    "optimized_sql": CASE_MAP["top_products"].candidates[0].sql,
+}
 
 
 class ProviderTests(unittest.TestCase):
@@ -235,7 +239,7 @@ class AnalysisWorkflowTests(unittest.TestCase):
         with patch(
             "api.services.analysis.analyze",
             return_value=(
-                Analysis(**DOCUMENT),
+                Analysis(**WORKFLOW_DOCUMENT),
                 {"seconds": 0.5, "input_tokens": 10, "output_tokens": 20},
             ),
         ) as generate:
@@ -263,7 +267,7 @@ class AnalysisWorkflowTests(unittest.TestCase):
         job = self.job()
         with patch(
             "api.services.analysis.analyze",
-            return_value=(Analysis(**DOCUMENT), {"seconds": 0.2}),
+            return_value=(Analysis(**WORKFLOW_DOCUMENT), {"seconds": 0.2}),
         ):
             original = execute_analysis(job, self.settings, self.store)
         self.store.update(job["id"], "COMPLETED", result=original)
@@ -309,11 +313,10 @@ class AnalysisWorkflowTests(unittest.TestCase):
                     sys.modules,
                     {
                         "psycopg": driver,
-                        "scripts.run_validation": SimpleNamespace(evaluate=evaluate),
                     },
                 ),
                 patch.dict(os.environ, {"SUE_DATABASE_URL": "postgresql://unit-only"}),
-                patch("cases.cases.make_ctx", return_value={}),
+                patch("api.services.analysis.evaluate", evaluate),
                 patch("api.services.analysis.analyze") as generation,
             ):
                 result = execute_analysis(task, settings, self.store)

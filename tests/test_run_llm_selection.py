@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from cases.cases import CASES
 from scripts import run_llm
@@ -29,12 +29,10 @@ class SelectionCliTests(unittest.TestCase):
                     patch("builtins.__import__", side_effect=guarded_import), \
                     patch.object(run_llm, "build_context") as context, \
                     patch.object(run_llm, "call_llm") as model, \
-                    patch.object(run_llm, "make_ctx") as parameters, \
                     contextlib.redirect_stdout(output):
                 run_llm.main(args)
             context.assert_not_called()
             model.assert_not_called()
-            parameters.assert_not_called()
             self.assertEqual(list(Path(directory).iterdir()), [])
             return output.getvalue()
 
@@ -66,7 +64,8 @@ class SelectionCliTests(unittest.TestCase):
 class PipelineRoutingTests(unittest.TestCase):
     def run_pipeline(self, extra_args):
         connection = Mock()
-        driver = SimpleNamespace(connect=Mock(return_value=connection))
+        driver = SimpleNamespace(connect=MagicMock())
+        driver.connect.return_value.__enter__.return_value = connection
         evaluate = Mock(side_effect=lambda conn, case, cand, ctx, reps: {
             "case": case.name, "candidate": cand.name, "verdict": "EQUIVALENT_NOT_FASTER",
             "orig_median_ms": 123.0,
@@ -74,7 +73,6 @@ class PipelineRoutingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(sys.modules, {"psycopg": driver, "scripts.run_validation": SimpleNamespace(evaluate=evaluate)}), \
                     patch.object(run_llm, "ROOT", Path(directory)), \
-                    patch.object(run_llm, "make_ctx", return_value={}), \
                     patch.object(run_llm, "build_context", side_effect=lambda conn, case, ctx, cond: {"query": case.original}) as context, \
                     patch.object(run_llm, "call_llm", wraps=run_llm.call_llm) as model, \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -84,7 +82,7 @@ class PipelineRoutingTests(unittest.TestCase):
             folder = folders[0]
             rows = json.loads((folder / "llm-results.json").read_text()) if (folder / "llm-results.json").exists() else []
             selection = json.loads((folder / "selection.json").read_text()) if (folder / "selection.json").exists() else None
-            driver.connect.assert_called_once_with("fake-uri", autocommit=True)
+            driver.connect.assert_called_once_with("fake-uri", autocommit=True, connect_timeout=5)
             return context.call_args_list, evaluate.call_args_list, model.call_count, rows, selection
 
     def test_selected_cases_reach_existing_context_and_validator_in_rank_order(self):

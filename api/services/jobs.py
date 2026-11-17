@@ -9,6 +9,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from api.config import Settings
+from api.services.errors import log_database_failure
 from api.services.privacy import redact
 from api.services.storage import Store
 from api.services.runtime import LOADED_REVISION, ensure_current
@@ -67,7 +68,10 @@ class JobManager:
             with self.lock:
                 self.processes.add(process)
             _, stderr = process.communicate(timeout=self.settings.timeout_seconds)
-            if self.store.job(job_id)["status"] not in {"COMPLETED", "FAILED"}:
+            finished = self.store.job(job_id)
+            if finished["status"] in {"COMPLETED", "FAILED"}:
+                log_database_failure(finished)
+            else:
                 self.store.update(
                     job_id,
                     "FAILED",

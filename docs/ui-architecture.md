@@ -14,9 +14,8 @@ Prism SQL-highlighting en Recharts de twee inhoudelijke grafieken.
 
 ## Datastroom
 
-Sinds 3 november is ook [gestructureerde OpenRouter-analyse](openrouter.md)
-aangesloten. `analysis` vereist geen database; `validate` test het opgeslagen
-voorstel afzonderlijk. De oudere live/replay-workflows hieronder blijven bestaan.
+De [OpenRouter-flow](openrouter.md) gebruikt één pipeline voor analyse, een
+volledige run en validatie van een opgeslagen voorstel.
 
 ```mermaid
 flowchart TD
@@ -30,19 +29,19 @@ flowchart TD
     Routes --> Queue["JobManager<br/>1 actief + 1 wachtend"]
     Queue --> Worker["Begrensd Python-workerproces"]
     Worker --> Selection
-    Worker --> Analysis["analysis: historische context → OpenRouter → Pydantic"]
-    Analysis --> Store
-    Worker --> Validate["validate: opgeslagen voorstel → SQL-gates → evaluate"]
-    Validate --> DB
+    Worker --> Check["Controle origineel"]
+    Check --> Analysis["analysis/live: context → OpenRouter → Pydantic"]
+    Analysis --> Proposal["Controle SQL-voorstel"]
+    Check --> Saved["validate: opgeslagen voorstel"]
+    Saved --> Proposal
+    Proposal --> Store
+    Proposal --> Validation["live/validate: validator/evaluation.py"]
     Worker --> Replay["Historische replay<br/>geen nieuwe meting"]
     Replay --> Historical
-    Worker --> Offline["Offline mock<br/>C1 + mockmodel + static_check"]
-    Worker --> Live["Expliciet ingeschakelde testuitvoering"]
-    Live --> Context["llm/context.py"]
-    Context --> DB[("Bevestigde testdatabase")]
-    Context --> Model["llm/client.py<br/>één generatie"]
-    Model --> Validation["evaluate + validator/<br/>correctheid + benchmark"]
+    Worker --> Offline["Expliciete mock en statische controle"]
+    Analysis -->|"C2–C4 op een live run"| DB[("Bevestigde testdatabase")]
     Validation --> DB
+    Validation --> Store
     Worker --> Store[(".local/dashboard.sqlite3<br/>nieuwe taken + JSON-resultaten")]
     Routes --> Feedback["Handmatige reviews"]
     Feedback --> Store
@@ -98,24 +97,24 @@ interactieve tabellen, charts, dialogs, SQL-copy, reviews en actieve-runstates.
 Er is geen globale state manager. `useApi` pollt actieve taken; na voltooiing
 stopt polling. Bij een fout is expliciete retry beschikbaar.
 
-## Een replay starten
+## Een replay starten via de API
 
 ```mermaid
 sequenceDiagram
     actor User as Gebruiker
-    participant UI as Run-dialog
     participant API as FastAPI
     participant Queue as JobManager
     participant Worker as Python-worker
     participant Select as query_selection
     participant Artifacts as Historische artefacten
     participant Store as SQLite
-    User->>UI: Kies case, replay en contextconditie
-    UI->>API: POST /api/runs (geen SQL)
+    participant UI as Run Details
+    User->>API: POST /api/runs met mode=replay, query_id en condition
     API->>API: Case, modus, bron en prerequisites controleren
     API->>Store: PENDING + gevalideerde configuratie
     API->>Queue: vaste operatie in begrensde queue
-    API-->>UI: 202 + run-ID
+    API-->>User: 202 + run-ID
+    User->>UI: Open run-ID in Analysehistorie
     Queue->>Worker: gegenereerde UUID, geen credentials in argv
     Worker->>Store: RUNNING
     Worker->>Select: mock_telemetry → select_queries → selected_cases
@@ -140,9 +139,9 @@ sequenceDiagram
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Historisch          | Bestaande artefacten bekijken. Geen nieuwe uitvoering.                                                                             |
 | Replay              | Nieuwe selectie en taakregistratie; historische response en metingen hergebruiken. Nul nieuwe modelrequests.                       |
-| Offline mock        | Nieuwe selectie, C1-fixturecontext, bestaande mockmodelcall en statische controle. Geen DB; correctheid/benchmark niet uitgevoerd. |
-| Testdatabase + mock | Bestaande context en evaluate op de bevestigde testdatabase; model geeft origineel terug.                                          |
-| Live POC            | Zelfde pad met precies één expliciet toegestaan extern modelrequest.                                                               |
+| Offline mock        | C1-casus met een kopie van de originele SQL en statische controle.                                                                  |
+| Testdatabase + mock | Dezelfde SQL aan beide kanten van de validator, als expliciete A/A-controle.                                                        |
+| Live                | Gestructureerde OpenRouter-analyse gevolgd door validatie op de bevestigde testdatabase.                                             |
 | AI-analyse          | Eén gestructureerd OpenRouter-request zonder database; advies blijft ongetest.                                                     |
 | Voorstelvalidatie   | Afzonderlijk opgeslagen voorstel testen na SQL-gates; geen nieuw modelrequest.                                                     |
 
@@ -174,8 +173,9 @@ wordt niet als totale fase-duur hergebruikt.
 - Bij mutatietests wordt de validator vergeleken met het auteurslabel. Een
   correct afgewezen mutant is een geslaagde test, geen goedgekeurd voorstel.
 
-De kernvalidator is niet gewijzigd. Onzichtbare normalisatiebotsingen kunnen
-niet achteraf uit oude JSON worden bewezen of gerepareerd.
+Het huidige validatorpad vergelijkt kolomtypen, volledige rijen met multipliciteit
+en de vereiste sorteervolgorde. Historische resultaten blijven voorzien van hun
+eigen herkomst en meetmethode.
 
 ## Opslag en beveiligingsgrens
 
@@ -189,11 +189,10 @@ Eén API-worker, één actief workerproces, één wachtende taak en een taaklimi
 taken als mislukt; geen stilzwijgende hervatting. Alleen vaste cases en suites
 zijn toegestaan. Processen gebruiken geen shell; credentials staan niet in argv.
 
-Live DB-connecties hebben connect-timeout 5 s, read-only default en
-statement-timeout 120 s. De bestaande validator gebruikt bovendien rollback en
-zijn eigen timeouts. De server moet uitsluitend een geïsoleerde testdatabase
-met passende rechten configureren; de applicatie bewijst niet dat een URI
-daadwerkelijk naar een niet-productieomgeving wijst.
+Live DB-connecties hebben connect-timeout 5 s en een read-only default. Proeven
+draaien in één snapshot met rollback, statement- en lock-time-outs en een
+rijlimiet. Gebruik een geïsoleerde testdatabase met een beperkte SELECT-rol.
+[Uitvoeringsgrenzen](openrouter.md#een-geïsoleerde-testdatabase-aansluiten)
 
 Services binden lokaal. Hostcontrole, beperkte origins en gevalideerde JSON-invoer
 beperken browsermisbruik. Er is geen authenticatiesysteem voor publieke hosting.

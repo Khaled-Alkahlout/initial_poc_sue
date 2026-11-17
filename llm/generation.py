@@ -5,12 +5,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 TOKEN_PRESETS = (512, 1024, 2048, 4096, 8192, 16384)
+REASONING_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
 
 class GenerationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
     max_output_tokens: int | None = 4096
-    reasoning_effort: Literal["disabled", "low", "medium", "high"] = "low"
+    reasoning_effort: Literal[
+        "provider", "disabled", "low", "medium", "high", "xhigh", "max"
+    ] = "low"
     temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
 
     @field_validator("max_output_tokens")
@@ -37,16 +41,16 @@ def capabilities(info: dict) -> dict:
     efforts = reasoning.get("supported_efforts", [])
     # A null list explicitly accepts all gateway levels; absence is unknown.
     supported = (
-        ["low", "medium", "high"]
+        list(REASONING_LEVELS)
         if efforts is None
-        else [e for e in ("low", "medium", "high") if e in efforts]
+        else [e for e in REASONING_LEVELS if e in efforts]
     )
     if not reasoning.get("mandatory", False) and (efforts is None or "none" in efforts):
         supported.insert(0, "disabled")
     if "reasoning" not in parameters:
         supported = []
     return {
-        "reasoning_efforts": supported,
+        "reasoning_efforts": ["provider", *supported],
         "temperature_supported": "temperature" in parameters,
         "max_output_tokens": (info.get("top_provider") or {}).get(
             "max_completion_tokens"

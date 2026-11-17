@@ -59,6 +59,52 @@ test("opgeslagen analyse verschijnt opnieuw bij openen van de workspace", async 
   expect(await screen.findByText("Analyse in workspace")).toBeInTheDocument();
 });
 
+test("volledige run vereist bevestiging voor zowel de database als het model", async () => {
+  const user = userEvent.setup();
+  const config = system();
+  config.run_modes.push(
+    {
+      id: "analysis",
+      label: "AI",
+      available: true,
+      reason: "",
+      executes_sql: false,
+      external_model: true,
+    },
+    {
+      id: "live",
+      label: "AI en validatie",
+      available: true,
+      reason: "",
+      executes_sql: true,
+      external_model: true,
+    },
+  );
+  const start = vi
+    .spyOn(api, "startRun")
+    .mockResolvedValue({ ...run(), mode: "live" });
+  render(
+    <AnalysisWorkspace
+      query={{ ...query(), runs: [], attempts: [] }}
+      system={config}
+    />,
+  );
+  await user.click(
+    screen.getByRole("checkbox", { name: /begrensde benchmark/ }),
+  );
+  const submit = screen.getByRole("button", { name: "Analyseer en valideer" });
+  expect(submit).toBeDisabled();
+  await user.click(screen.getByRole("checkbox", { name: /extern AI-request/ }));
+  await user.click(submit);
+  expect(start).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      mode: "live",
+      confirm_sql: true,
+      confirm_external_model: true,
+    }),
+  );
+});
+
 test("ontbrekende providerconfiguratie geeft uitleg en geen modelrequest", () => {
   render(
     <AnalysisWorkspace

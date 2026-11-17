@@ -67,13 +67,18 @@ export function RunDetail({
   const historical = run.mode === "historical" || run.mode === "replay";
   const analysisStages = attempt?.stages.length ? attempt.stages : run.stages;
   const stages = analysisStages.map((stage) =>
-    ["static", "correctness", "benchmark", "result"].includes(stage.id)
+    ["input_check", "static", "correctness", "benchmark", "result"].includes(
+      stage.id,
+    )
       ? (validation?.stages.find((check) => check.id === stage.id) ?? stage)
       : stage,
   );
   const validationEligible =
-    run.mode === "analysis" &&
-    run.lifecycle === "COMPLETED" &&
+    !active(run) &&
+    (run.mode === "analysis" ||
+      (run.mode === "live" &&
+        (attempt?.outcome === "error" ||
+          attempt?.outcome === "inconclusive"))) &&
     !!attempt?.proposed_sql &&
     attempt.outcome !== "safety_rejected";
   const validationAction = validation ? (
@@ -188,6 +193,15 @@ export function RunDetail({
                 </Link>
               </>
             )}
+          </p>
+        </div>
+      )}
+      {(run.mode === "mock" || run.mode === "live_mock") && (
+        <div className="notice notice-blue provenance-notice">
+          <Info size={16} />
+          <p>
+            <strong>Demo met mockmodel.</strong> Het voorstel is een kopie van
+            de oorspronkelijke SQL.
           </p>
         </div>
       )}

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from api.config import ROOT, Settings
+from api.services.errors import log_database_failure
 from api.services.jobs import BusyError, JobManager
 from api.services.storage import Store
 
@@ -79,6 +80,32 @@ class JobManagementTests(unittest.TestCase):
         self.assertEqual(
             [s["status"] for s in progress], ["passed", "error", "skipped", "error"]
         )
+
+    def test_database_log_contains_only_safe_diagnostics(self):
+        job = {
+            "id": "test-run",
+            "result": {
+                "attempts": [
+                    {
+                        "raw_record": {
+                            "database_error": {
+                                "phase": "correctness",
+                                "code": "permissions",
+                                "sqlstate": "42501",
+                                "driver_message": "secret DSN and SQL",
+                            }
+                        }
+                    }
+                ]
+            },
+        }
+        with self.assertLogs("sue.api", level="WARNING") as logs:
+            log_database_failure(job)
+        self.assertIn(
+            "run_id=test-run phase=correctness code=permissions sqlstate=42501",
+            logs.output[0],
+        )
+        self.assertNotIn("secret", logs.output[0])
 
 
 if __name__ == "__main__":

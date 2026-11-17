@@ -1,0 +1,16 @@
+-- name: revenue_orders
+-- owner: finance
+-- params: tenant_id, from, to
+-- Revenue-bearing orders in a window. Period grouping (day/week/month, week
+-- start, fiscal month boundaries) is applied by the service layer so the same
+-- query feeds every grouping the dashboard offers.
+SELECT o.id,
+       o.created_at,
+       o.status,
+       o.total_cents,
+       o.currency
+  FROM orders o
+ WHERE o.tenant_id = %(tenant_id)s
+   AND o.created_at >= %(from)s
+   AND o.created_at <  %(to)s
+   AND o.status IN ('paid', 'processing', 'shipped', 'delivered')

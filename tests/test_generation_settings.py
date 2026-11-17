@@ -256,7 +256,8 @@ class PersistenceTests(unittest.TestCase):
                     client.put("/api/settings/ai", json=value).status_code, 200
                 )
                 self.assertEqual(
-                    client.get("/api/settings/ai").json()["settings"], value
+                    client.get("/api/settings/ai").json()["settings"],
+                    {"model": None, **value},
                 )
                 self.assertEqual(
                     client.put(

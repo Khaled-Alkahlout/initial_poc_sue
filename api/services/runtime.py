@@ -8,10 +8,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def source_revision():
     digest = hashlib.sha256()
-    for folder in ("api", "llm"):
+    for folder in ("api", "llm", "validator", "cases"):
         for path in sorted((PROJECT_ROOT / folder).rglob("*.py")):
             digest.update(path.relative_to(PROJECT_ROOT).as_posix().encode())
             digest.update(path.read_bytes())
+    for path in sorted((PROJECT_ROOT / "cases" / "original").glob("*.sql")):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
     return digest.hexdigest()
 
 

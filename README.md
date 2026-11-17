@@ -2,12 +2,12 @@
 
 ## Webdashboard — POC en Development
 
-**Nieuw:** [OpenRouter AI-analyse, configuratie en afzonderlijke validatie](docs/openrouter.md).
-Generatiebudget, reasoning en responsdiagnostiek zijn beschikbaar via **AI Settings**:
-zie [instellingen en werkelijke verificatie](docs/ai-settings.md).
-Open een query in de Analysis Workspace en kies **Analyze with AI**. Dit werkt
-met Claude Haiku via OpenRouter zonder database-uitvoering; validatie is een
-afzonderlijke opt-in op een opgeslagen voorstel. De API laadt een lokale `.env`.
+Open een query in de Analysis Workspace en kies **Analyze with AI** voor advies
+via OpenRouter. Met een bevestigde testdatabase voer je de volledige keten uit
+via **POC starten** of **Analyseer en valideer**. Je kunt een opgeslagen voorstel
+ook afzonderlijk testen.
+Kies model, outputbudget en reasoning via **AI Settings**.
+[Installatie en beveiligingsgrenzen](docs/openrouter.md)
 
 De repository bevat een Next.js/React/TypeScript-dashboard met een dunne FastAPI-laag.
 Bekijk queryselectie, SQL-voorstellen, historische benchmarks, testdetails en
@@ -87,7 +87,7 @@ Deze repository beoordeelt elke herschrijving automatisch in drie stappen:
 2. **Resultaatvergelijking.** Geeft de herschrijving op meerdere parametersets exact dezelfde rijen als het origineel?
 3. **Tijdmeting.** Is de herschrijving op een eerlijke, herhaalde meting minstens 1,2× sneller?
 
-Het eindoordeel is een van vier uitkomsten: `REJECTED_STATIC`, `REJECTED_NOT_EQUIVALENT`, `EQUIVALENT_NOT_FASTER` of `ACCEPTED`.
+Het eindoordeel geeft aan of het voorstel is afgewezen, onvoldoende snelheidsbewijs heeft, of binnen de proef is geaccepteerd. Onvolledige proeven en uitvoeringsfouten krijgen een eigen status.
 
 ### Wat erin zit
 
@@ -137,13 +137,14 @@ De testdatabase is de webshop "Bazaar" van SUE (FastAPI, PostgreSQL 16, bewust t
                                                                               │
           1. statische controle (sqlglot)  ── niet geldig ──────────────► REJECTED_STATIC
           2. zelfde resultaat op alle parametersets ── verschil ───────► REJECTED_NOT_EQUIVALENT
-          3. tijd: ABAB, mediaan ── speedup < 1,2 ─────────────────────► EQUIVALENT_NOT_FASTER
-                                  ── speedup ≥ 1,2 ────────────────────► ACCEPTED
+          3. tijd: gepaarde meting ── drempel niet gehaald ─────────────► EQUIVALENT_NOT_FASTER
+                                    ── spreiding te groot ─────────────► PERFORMANCE_INCONCLUSIVE
+                                    ── drempel met marge gehaald ──────► ACCEPTED
 ```
 
-**Statische controle** (`validator/checker.py`, `static_check`). De SQL wordt geparsed met sqlglot (PostgreSQL-dialect). Het moet precies één `SELECT` zijn. DDL en DML worden afgekeurd, ook binnen een CTE.
+**Statische controle** (`validator/checker.py`). Sqlglot controleert de PostgreSQL-AST van beide queries. Het voorstel behoudt de benoemde parameters en mag alleen tabellen van het origineel gebruiken. Een beperkte lijst functies en typen is toegestaan.
 
-**Resultaatvergelijking** (`checker.py`, `run_query` en `compare`). Elke query draait in een read-only transactie met een `statement_timeout`, die altijd wordt teruggedraaid. De rijen worden vergeleken als multiset van genormaliseerde waarden (`validator/normalize.py`: int, `Decimal` en float zijn gelijk bij dezelfde waarde). Heeft het origineel een `ORDER BY`, dan wordt ook de volgorde van de sorteersleutel vergeleken. Een verschil dat alleen rijen met dezelfde sorteersleutel aan de `LIMIT`-grens betreft, geeft `TIE_AMBIGUOUS` en telt niet als fout, omdat beide uitkomsten dan geldig zijn.
+**Resultaatvergelijking** (`validator/evaluation.py`). Alle proeven draaien in één read-only `REPEATABLE READ`-snapshot met rollback. De validator vergelijkt kolomnamen en PostgreSQL-typen, de rijmultiset met behoud van duplicaten en de vereiste volgorde. Een verschil bij gelijke sorteersleutels blokkeert goedkeuring zodra de rijinhoud of rijtelling verschilt.
 
 **Parametersets** (`cases/cases.py`, `make_ctx`). De parameters komen uit de database zelf: een grote en een kleine tenant (de tenants met de meeste en de minste orders), elk met vier tijdvensters:
 
@@ -156,11 +157,11 @@ De testdatabase is de webshop "Bazaar" van SUE (FastAPI, PostgreSQL 16, bewust t
 
 Een gelijk resultaat op één parameterset bewijst weinig; daarom worden alle combinaties gecontroleerd. Voor trage query's kan een deelverzameling worden gebruikt (zie `tc_params` in `cases.py`).
 
-**Tijdmeting** (`validator/timing.py`, `measure`). Origineel en herschrijving worden om en om gemeten (ABAB), zodat een tijdelijk trage periode van de computer beide even hard raakt. Standaard zijn dat 2 warm-ups en 7 meetherhalingen; de **mediaan** telt, omdat één uitschieter de mediaan niet verandert. De speedup is de mediaan van het origineel gedeeld door die van de herschrijving, en pas vanaf `SPEEDUP_THRESHOLD = 1.2` is het oordeel `ACCEPTED`. Duurt het origineel langer dan 5 seconden, dan worden hooguit 3 herhalingen zonder warm-up gedaan.
+**Tijdmeting** (`validator/timing.py`). Na volledige correctheidsvergelijking volgt een meting met afwisselende startvolgorde. Goedkeuring vereist minstens 1,2× verschil in de medianen en tussen het eerste kwartiel van het origineel en het derde kwartiel van het voorstel. Te weinig bewijs, tijdslimieten en databasefouten hebben een eigen uitkomst.
 
 **Mutatietest.** `cases/cases.py` bevat per query handgemaakte herschrijvingen met een verwacht oordeel (`expected`): foute (mutanten, gemaakt door kleine wijzigingen aan de SQL) en gelijkwaardige. De validator moet alle foute afkeuren en geen gelijkwaardige. Het verwachte oordeel is de redenering van degene die de herschrijving maakte en is niet onafhankelijk bewezen.
 
-**A/A-controle.** `run_llm.py --model mock` geeft het origineel terug als "antwoord". De echte speedup is dan 1,0, dus elke `ACCEPTED` is meetruis.
+**A/A-controle.** `run_llm.py --model mock` vergelijkt de query met zichzelf om meetvariatie zichtbaar te maken. Alleen een inhoudelijk andere SQL kan worden geaccepteerd.
 
 ---
 
@@ -171,9 +172,9 @@ Een gelijk resultaat op één parameterset bewijst weinig; daarom worden alle co
 | Conditie | Wat het model krijgt |
 |---|---|
 | `C1_query` | alleen de originele query |
-| `C2_schema` | + kolommen, constraints en indexen van de gebruikte tabellen |
-| `C3_plan` | + `EXPLAIN (ANALYZE, BUFFERS)` van het origineel |
-| `C4_stats` | + geschatte rijen per tabel en `pg_stats` van de gebruikte kolommen |
+| `C2_schema` | + kolommen, nullability en indexmetadata van de gebruikte tabellen |
+| `C3_plan` | + plannerinschattingen uit `EXPLAIN (FORMAT JSON)`, zonder filters of gebonden waarden |
+| `C4_stats` | + geschatte tabelgrootte, nullfractie en aantal verschillende waarden |
 
 De context wordt gebouwd in `llm/context.py` (`build_context`). De tabellen en kolommen worden met sqlglot uit de originele query gehaald, dus er is geen handmatige lijst nodig. Kies met `--conditions` welke condities draaien.
 
@@ -188,7 +189,7 @@ De context wordt gebouwd in `llm/context.py` (`build_context`). De tabellen en k
 ├── scripts/                      # de uitvoerbare programma's
 │   ├── start_db.py               # start de ingebedde PostgreSQL, print de URI
 │   ├── stop_db.py                # stopt de database
-│   ├── run_validation.py         # mutatietest; bevat ook evaluate(), dat run_llm.py hergebruikt
+│   ├── run_validation.py         # mutatietest met de gedeelde evaluator
 │   ├── run_llm.py                # LLM laten herschrijven en elk antwoord beoordelen
 │   └── analyse.py                # leest results/, maakt tabellen en figuren
 ├── query_selection/              # onafhankelijke selectie vóór contextopbouw
@@ -205,6 +206,7 @@ De context wordt gebouwd in `llm/context.py` (`build_context`). De tabellen en k
 │   │   └── case.py               # dataclass Case: origineel, ORDER BY-kolommen, parametersets, kandidaten
 │   └── original/                 # de 4 originele SUE-query's (.sql)
 ├── validator/                    # het framework
+│   ├── evaluation.py             # vergelijkingsproeven, benchmark en besluit
 │   ├── checker.py                # static_check, run_query, compare
 │   ├── normalize.py              # norm_value, norm_row
 │   ├── timing.py                 # measure; SPEEDUP_THRESHOLD = 1.2
@@ -224,7 +226,7 @@ Er zijn bewust geen `__init__.py`-bestanden (Python-namespacepakketten). De scri
 | Functie | Bestand | Wat het doet |
 |---|---|---|
 | `static_check(sql)` | `validator/checker.py` | Parsed de SQL en keurt alles af wat geen enkele `SELECT` is |
-| `run_query(conn, sql, params, timeout_ms)` | `validator/checker.py` | Voert uit in een read-only transactie en rolt altijd terug |
+| `run_query(conn, sql, params)` | `validator/checker.py` | Haalt maximaal 2.001 rijen op binnen de actieve read-only snapshot |
 | `compare(orig, cand, order_cols)` | `validator/checker.py` | Vergelijkt twee resultaten; geeft een `Comparison` |
 | `measure(conn, orig_sql, cand_sql, params, reps=7, warmup=2)` | `validator/timing.py` | ABAB-meting; geeft mediaan en speedup |
 | `evaluate(conn, case, cand, ctx, reps)` | `scripts/run_validation.py` | Volledige keten voor één kandidaat; geeft het eindoordeel |

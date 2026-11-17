@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  databaseTestSchema,
   executionSchema,
   feedbackSchema,
   overviewSchema,
@@ -102,10 +103,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sql_displayed: sqlDisplayed }),
     }),
-  getAISettings: () =>
-    request("/settings/ai", aiSettingsSchema, {
-      signal: AbortSignal.timeout(30000),
-    }),
+  getAISettings: (model?: string) =>
+    request(
+      model ? "/settings/ai?model=" + id(model) : "/settings/ai",
+      aiSettingsSchema,
+      {
+        signal: AbortSignal.timeout(30000),
+      },
+    ),
   saveAISettings: (value: GenerationSettings) =>
     request("/settings/ai", generationSettingsSchema, {
       method: "PUT",
@@ -159,6 +164,11 @@ export const api = {
       body: JSON.stringify(input),
     }),
   getSystem: () => request("/system/status", systemSchema),
+  checkDatabase: () =>
+    request("/system/check-database", databaseTestSchema, {
+      method: "POST",
+      signal: AbortSignal.timeout(20_000),
+    }),
 };
 export const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : "Onbekende fout.";

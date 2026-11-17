@@ -16,14 +16,14 @@ import argparse
 import csv
 import json
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from statistics import median
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from cases.cases import CASES, make_ctx  # noqa: E402
+from cases.cases import CASES  # noqa: E402
 from cases.classes.candidate import Candidate  # noqa: E402
 from llm.client import SYSTEM, build_prompt, call_llm, extract_sql  # noqa: E402
 from llm.context import CONDITIONS, build_context  # noqa: E402
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None):
     ap.add_argument("uri", nargs="?", help="verplicht behalve bij --selection-only")
     ap.add_argument("--model", default="claude-sonnet-5-5", help="Anthropic-modelnaam, of 'mock'")
     ap.add_argument("--reps", type=int, default=3, help="LLM-aanroepen per query per conditie")
-    ap.add_argument("--val-reps", type=int, default=7, help="tijdmetingen per gelijkwaardige kandidaat (3 gaf valse ACCEPTED in de A/A-test)")
+    ap.add_argument("--val-reps", type=int, choices=range(1, 13), default=6, help="meetparen per gelijkwaardige kandidaat")
     ap.add_argument("--cases", nargs="*", default=[c.name for c in CASES])
     ap.add_argument("--conditions", nargs="*", default=CONDITIONS, choices=CONDITIONS)
     ap.add_argument("--dry-run", action="store_true", help="alleen prompts opslaan, geen LLM en geen validatie")
@@ -101,38 +101,37 @@ def main(argv: list[str] | None = None):
             json.dumps(selection.to_dict(), indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     decisions_by_id = {d.telemetry.query_id: d for d in selection.selected} if selection else {}
 
-    conn = psycopg.connect(args.uri, autocommit=True)
-    ctx = make_ctx(conn)
     results = []
-    for case in cases_to_run:
-        for cond in args.conditions:
-            prompt = build_prompt(build_context(conn, case, ctx, cond))
-            (out / "prompts" / f"{case.name}__{cond}.txt").write_text(prompt, encoding="utf-8")
-            if args.dry_run:
-                print(f"{case.name:15} {cond:10} prompt: {len(prompt)} tekens")
-                continue
-            for rep in range(1, args.reps + 1):
-                resp = call_llm(prompt, args.model, original_sql=case.original)
-                sql = extract_sql(resp["text"])
-                tag = f"{case.name}__{cond}__r{rep}"
-                (out / "responses" / f"{tag}.json").write_text(
-                    json.dumps({**resp, "sql": sql, "model": args.model}, indent=2, ensure_ascii=False), encoding="utf-8")
-                cand = Candidate(f"LLM_{cond}_r{rep}", sql, "unknown", "llm")
-                unchanged = sql.strip() == case.original.strip()
-                r = evaluate(conn, case, cand, ctx, args.val_reps)
-                r.update({"condition": cond, "rep": rep, "model": args.model, "unchanged": unchanged,
-                          "input_tokens": resp["input_tokens"], "output_tokens": resp["output_tokens"],
-                          "llm_seconds": resp["seconds"]})
-                if case.name in decisions_by_id:
-                    decision = decisions_by_id[case.name]
-                    r.update({"query_id": case.name, "selection_rank": decision.rank,
-                              "workload_impact_ms": decision.impact_ms,
-                              "telemetry_source": decision.telemetry.source,
-                              "telemetry_is_synthetic": decision.telemetry.is_synthetic,
-                              "telemetry_window_id": decision.telemetry.window_id})
-                results.append(r)
-                print(f"{case.name:15} {cond:10} r{rep}  -> {r['verdict']:24} {r.get('speedup', '')}"
-                      + ("  (ongewijzigd)" if unchanged else ""))
+    with psycopg.connect(args.uri, autocommit=True, connect_timeout=5) as conn:
+        for case in cases_to_run:
+            for cond in args.conditions:
+                prompt = build_prompt(build_context(conn, case, None, cond))
+                (out / "prompts" / f"{case.name}__{cond}.txt").write_text(prompt, encoding="utf-8")
+                if args.dry_run:
+                    print(f"{case.name:15} {cond:10} prompt: {len(prompt)} tekens")
+                    continue
+                for rep in range(1, args.reps + 1):
+                    resp = call_llm(prompt, args.model, original_sql=case.original)
+                    sql = extract_sql(resp["text"])
+                    tag = f"{case.name}__{cond}__r{rep}"
+                    (out / "responses" / f"{tag}.json").write_text(
+                        json.dumps({**resp, "sql": sql, "model": args.model}, indent=2, ensure_ascii=False), encoding="utf-8")
+                    cand = Candidate(f"LLM_{cond}_r{rep}", sql, "unknown", "llm")
+                    unchanged = sql.strip() == case.original.strip()
+                    r = evaluate(conn, case, cand, None, args.val_reps)
+                    r.update({"condition": cond, "rep": rep, "model": args.model, "unchanged": unchanged,
+                              "input_tokens": resp["input_tokens"], "output_tokens": resp["output_tokens"],
+                              "llm_seconds": resp["seconds"]})
+                    if case.name in decisions_by_id:
+                        decision = decisions_by_id[case.name]
+                        r.update({"query_id": case.name, "selection_rank": decision.rank,
+                                  "workload_impact_ms": decision.impact_ms,
+                                  "telemetry_source": decision.telemetry.source,
+                                  "telemetry_is_synthetic": decision.telemetry.is_synthetic,
+                                  "telemetry_window_id": decision.telemetry.window_id})
+                    results.append(r)
+                    print(f"{case.name:15} {cond:10} r{rep}  -> {r['verdict']:24} {r.get('speedup', '')}"
+                          + ("  (ongewijzigd)" if unchanged else ""))
     if args.dry_run:
         print("prompts opgeslagen in", out / "prompts")
         return
@@ -151,10 +150,10 @@ def main(argv: list[str] | None = None):
         by[r["condition"]].append(r)
     for cond in args.conditions:
         rs = by[cond]
-        cnt = lambda v: sum(r["verdict"] == v for r in rs)
+        cnt = Counter(r["verdict"] for r in rs)
         acc = [r["speedup"] for r in rs if r["verdict"] == "ACCEPTED" and r.get("speedup")]
-        print(f"{cond:10} {len(rs):>3} {cnt('REJECTED_STATIC'):>9} {cnt('REJECTED_NOT_EQUIVALENT'):>5} "
-              f"{cnt('EQUIVALENT_NOT_FASTER'):>20} {cnt('ACCEPTED'):>9} {(round(median(acc), 2) if acc else '-'):>23}")
+        print(f"{cond:10} {len(rs):>3} {cnt['REJECTED_STATIC']:>9} {cnt['REJECTED_NOT_EQUIVALENT']:>5} "
+              f"{cnt['EQUIVALENT_NOT_FASTER']:>20} {cnt['ACCEPTED']:>9} {(round(median(acc), 2) if acc else '-'):>23}")
     print("opgeslagen in", out)
 
 

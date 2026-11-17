@@ -12,6 +12,11 @@ import { count } from "@/lib/formatters";
 
 export function AISettingsPage({ initial }: { initial: AISettings }) {
   const [value, setValue] = useState<GenerationSettings>(initial.settings);
+  const [activeModel, setActiveModel] = useState(initial.model);
+  const [capabilities, setCapabilities] = useState(initial.capabilities);
+  const [capabilitiesError, setCapabilitiesError] = useState(
+    initial.capabilities_error,
+  );
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,14 +26,50 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
   const [testResult, setTestResult] = useState<Awaited<
     ReturnType<typeof api.testAIGeneration>
   > | null>(null);
+  const defaultModel = initial.default_model ?? initial.model;
+  const selectedModel = value.model ?? defaultModel;
+  const models = initial.models ?? [initial.model];
+
+  async function loadCapabilities(model: string) {
+    const preview = await api.getAISettings(model);
+    setCapabilities(preview.capabilities);
+    setCapabilitiesError(preview.capabilities_error);
+    if (preview.capabilities && !preview.capabilities.temperature_supported) {
+      setValue((current) => ({ ...current, temperature: null }));
+    }
+  }
+
+  async function selectModel(model: string) {
+    setValue({ ...value, model });
+    setCapabilities(null);
+    setCapabilitiesError(null);
+    setError(null);
+    setBusy(true);
+    try {
+      await loadCapabilities(model);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save(reset = false) {
     setBusy(true);
     setError(null);
     setFeedback(null);
     try {
-      setValue(
-        await (reset ? api.resetAISettings() : api.saveAISettings(value)),
-      );
+      const saved = await (reset
+        ? api.resetAISettings()
+        : api.saveAISettings(value));
+      const model = saved.model ?? defaultModel;
+      setValue(saved);
+      if (model !== activeModel) setTestResult(null);
+      setActiveModel(model);
+      if (model !== selectedModel) {
+        setCapabilities(null);
+        await loadCapabilities(model);
+      }
       setFeedback(
         reset
           ? "Omgevingsstandaarden hersteld; volgende aanvragen gebruiken deze waarden."
@@ -53,17 +94,20 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
     }
   }
   const labels: Record<string, string> = {
+    provider: "Provider-default",
     disabled: "Uitgeschakeld",
     low: "Low",
     medium: "Medium",
     high: "High",
+    xhigh: "Extra high",
+    max: "Max",
   };
   return (
     <div className="stack">
       <PageHeader
         title="AI Settings"
         eyebrow="INSTELLINGEN / GENERATIE"
-        description="Beheer het outputbudget en reasoning. Instellingen veranderen geen databasebevoegdheden of API-credentials."
+        description="Kies het model, outputbudget en reasoning voor volgende AI-aanvragen."
       />
       <Card>
         <CardHeader
@@ -78,7 +122,7 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
             </div>
             <div>
               <dt>Model</dt>
-              <dd className="mono">{initial.model}</dd>
+              <dd className="mono">{activeModel}</dd>
             </div>
             <div>
               <dt>API-key geconfigureerd</dt>
@@ -170,6 +214,27 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
             void save();
           }}
         >
+          {(models.length > 1 || !models.includes(selectedModel)) && (
+            <label className="field">
+              <span>Model voor nieuwe aanvragen</span>
+              <Select
+                value={selectedModel}
+                disabled={busy}
+                onChange={(e) => void selectModel(e.target.value)}
+              >
+                {!models.includes(selectedModel) && (
+                  <option value={selectedModel} disabled>
+                    {selectedModel} · niet beschikbaar
+                  </option>
+                )}
+                {models.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
           <label className="field">
             <span>Maximum output tokens</span>
             <Select
@@ -189,8 +254,10 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
                   key={n}
                   value={n}
                   disabled={
-                    !!initial.capabilities?.max_output_tokens &&
-                    n > initial.capabilities.max_output_tokens
+                    !!capabilities &&
+                    (!capabilities.max_tokens_supported ||
+                      (capabilities.max_output_tokens != null &&
+                        n > capabilities.max_output_tokens))
                   }
                 >
                   {n.toLocaleString("nl-NL")}
@@ -204,7 +271,7 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
           <p className="muted text-xs">
             Provider-default laat max_tokens weg; het is geen onbeperkt budget.
             Modellimiet:{" "}
-            {initial.capabilities?.max_output_tokens?.toLocaleString("nl-NL") ??
+            {capabilities?.max_output_tokens?.toLocaleString("nl-NL") ??
               "niet gerapporteerd"}
             .
           </p>
@@ -224,12 +291,10 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
                 <option
                   key={key}
                   value={key}
-                  disabled={
-                    !initial.capabilities?.reasoning_efforts.includes(key)
-                  }
+                  disabled={!capabilities?.reasoning_efforts.includes(key)}
                 >
                   {label}
-                  {!initial.capabilities?.reasoning_efforts.includes(key)
+                  {!capabilities?.reasoning_efforts.includes(key)
                     ? " · niet ondersteund/bevestigd"
                     : ""}
                 </option>
@@ -240,7 +305,7 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
             Low is de standaard voor SQL-analyse. Hogere effort kan meer
             outputbudget gebruiken voordat zichtbare JSON verschijnt.
           </p>
-          {initial.capabilities?.temperature_supported ? (
+          {capabilities?.temperature_supported ? (
             <label className="field">
               <span>Temperature · leeg = provider-default</span>
               <Input
@@ -264,10 +329,10 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
               stuurt deze parameter niet mee.
             </p>
           )}
-          {initial.capabilities_error && (
+          {capabilitiesError && (
             <p role="alert" className="notice notice-amber">
               Modelmogelijkheden konden niet worden bevestigd:{" "}
-              {initial.capabilities_error}
+              {capabilitiesError}
             </p>
           )}
           <p className="muted text-xs">{initial.precedence}</p>
@@ -280,7 +345,7 @@ export function AISettingsPage({ initial }: { initial: AISettings }) {
             >
               Standaarden herstellen
             </Button>
-            <Button type="submit" disabled={busy || !initial.capabilities}>
+            <Button type="submit" disabled={busy || !capabilities}>
               Instellingen opslaan
             </Button>
           </div>

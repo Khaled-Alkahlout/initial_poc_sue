@@ -61,6 +61,14 @@ class ContextSection(BaseModel):
     note: str
 
 
+class ParameterCheck(BaseModel):
+    label: str
+    status: str
+    detail: str
+    original_rows: int | None = None
+    proposed_rows: int | None = None
+
+
 class Attempt(BaseModel):
     diagnostics: dict[str, Any] = Field(default_factory=dict)
     partial_response: str | None = None
@@ -80,6 +88,7 @@ class Attempt(BaseModel):
     detail: str
     parameter_sets: int | None = None
     failing_parameter_sets: int | None = None
+    parameter_checks: list[ParameterCheck] = Field(default_factory=list)
     input_tokens: int | None = None
     output_tokens: int | None = None
     llm_seconds: float | None = None
@@ -267,6 +276,16 @@ class Capability(BaseModel):
     reason: str
     executes_sql: bool = False
     external_model: bool = False
+
+
+class DatabaseCheckStep(BaseModel):
+    status: Literal["passed", "failed", "skipped"]
+    message: str
+
+
+class DatabaseConnectionTest(BaseModel):
+    connection: DatabaseCheckStep
+    tables: DatabaseCheckStep
 
 
 class SystemStatus(BaseModel):

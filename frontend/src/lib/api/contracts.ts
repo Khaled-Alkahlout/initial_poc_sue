@@ -71,7 +71,8 @@ export const attemptSchema = z.object({
   diagnostics: z
     .object({
       http_status: z.number().nullable().optional(),
-      model: z.string().optional(),
+      model: z.string().nullable().optional(),
+      routed_provider: z.string().nullable().optional(),
       finish_reason: z.string().nullable().optional(),
       native_finish_reason: z.string().nullable().optional(),
       input_tokens: z.number().nullable().optional(),
@@ -138,6 +139,17 @@ export const attemptSchema = z.object({
   detail: z.string(),
   parameter_sets: z.number().nullable(),
   failing_parameter_sets: z.number().nullable(),
+  parameter_checks: z
+    .array(
+      z.object({
+        label: z.string(),
+        status: z.string(),
+        detail: z.string(),
+        original_rows: z.number().nullable(),
+        proposed_rows: z.number().nullable(),
+      }),
+    )
+    .optional(),
   input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
   llm_seconds: z.number().nullable(),
@@ -267,6 +279,16 @@ const capabilitySchema = z.object({
   executes_sql: z.boolean(),
   external_model: z.boolean(),
 });
+const databaseCheckStepSchema = z.object({
+  status: z.enum(["passed", "failed", "skipped"]),
+  message: z.string(),
+});
+export const databaseTestSchema = z.object({
+  connection: databaseCheckStepSchema,
+  tables: databaseCheckStepSchema,
+});
+export type DatabaseTest = z.infer<typeof databaseTestSchema>;
+
 export const systemSchema = z.object({
   provider: z.string().nullable().optional(),
   configured_model: z.string().nullable().optional(),
@@ -329,14 +351,25 @@ export type TestInput = {
 };
 
 export const generationSettingsSchema = z.object({
+  model: z.string().nullable().optional(),
   max_output_tokens: z.number().nullable(),
-  reasoning_effort: z.enum(["disabled", "low", "medium", "high"]),
+  reasoning_effort: z.enum([
+    "provider",
+    "disabled",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]),
   temperature: z.number().nullable(),
 });
 export type GenerationSettings = z.infer<typeof generationSettingsSchema>;
 export const aiSettingsSchema = z.object({
   provider: z.string(),
   model: z.string(),
+  models: z.array(z.string()).optional(),
+  default_model: z.string().optional(),
   key_configured: z.boolean(),
   llm_enabled: z.boolean(),
   settings: generationSettingsSchema,

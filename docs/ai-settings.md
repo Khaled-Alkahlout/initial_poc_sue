@@ -1,8 +1,9 @@
 # AI Settings en responsdiagnostiek
 
 De pagina `/settings` beheert generatie-instellingen via FastAPI en de bestaande
-lokale SQLite-opslag. De API-key, modelkeuze en SQL-veiligheidsflags blijven
-serverconfiguratie. De browser schrijft nooit `.env`.
+lokale SQLite-opslag. De server configureert de API-key, het modelaanbod en de
+SQL-veiligheidsflags. De gebruiker kiest uit `SUE_MODEL` en de extra volledige
+OpenRouter-ID's in `SUE_ALLOWED_MODELS`.
 
 ## Diagnose vóór de wijziging
 
@@ -31,8 +32,9 @@ SUE_REASONING_EFFORT=low
 
 Prioriteit: opgeslagen voorkeuren → environment defaults → bovenstaande ingebouwde
 standaarden. Procesvariabelen blijven vóór `.env` gaan. Een save bewaart uitsluitend
-`max_output_tokens`, `reasoning_effort` en `temperature` als JSON in de SQLite-tabel
-`settings`. Nieuwe analyses krijgen bij enqueue een snapshot in hun taakconfiguratie.
+`model`, `max_output_tokens`, `reasoning_effort` en `temperature` als JSON in de
+SQLite-tabel `settings`. Nieuwe analyses en volledige runs krijgen bij enqueue
+een snapshot met het effectieve model in hun taakconfiguratie.
 Wijzigingen gelden voor volgende aanvragen, zonder API-herstart. Bestaande runs
 en al ingeplande aanvragen veranderen niet.
 
@@ -47,12 +49,10 @@ Het OpenRouter Chat Completions-endpoint krijgt `max_tokens` en
 `exclude` voorkomt terugsturen van reasoningtekst; het schakelt reasoning niet uit.
 Er wordt geen reasoningtekst opgeslagen of weergegeven.
 
-De modelcatalogus bepaalt beschikbare efforts, temperature-ondersteuning en de
-gerapporteerde maximale completionlengte. Onbevestigde of onondersteunde waarden
-worden niet stilzwijgend genegeerd. De geconfigureerde Haiku 5.5 ondersteunt low,
-medium, high en uitschakelen; de catalogus meldt geen temperature-ondersteuning.
-Temperature blijft daarom null en wordt niet meegestuurd. Bij andere modellen
-verschijnt de instelling alleen wanneer ondersteuning bevestigd is.
+De modelcatalogus bepaalt welke opties beschikbaar zijn voor het gekozen model,
+waaronder low, medium, high, xhigh, max en uitschakelen. Provider-default laat
+de reasoningoptie weg. De worker controleert de gekozen combinatie opnieuw
+vóór de aanvraag. Temperature is beschikbaar bij bevestigde ondersteuning.
 
 Bronnen: [modelcatalogus](https://openrouter.ai/api/v1/models) en
 [OpenRouter reasoning-documentatie](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).

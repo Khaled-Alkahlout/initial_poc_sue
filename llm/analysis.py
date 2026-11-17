@@ -110,6 +110,36 @@ def configuration() -> tuple[str, str, str]:
     return provider, model, key
 
 
+def configured_models(provider: str, default: str) -> list[str]:
+    if provider != "openrouter":
+        return [default]
+    configured = (
+        model.strip() for model in os.getenv("SUE_ALLOWED_MODELS", "").split(",")
+    )
+    return list(
+        dict.fromkeys(
+            [
+                default,
+                *(
+                    model
+                    for model in configured
+                    if re.fullmatch(r"[\w.-]+/[\w.:-]{1,160}", model, re.ASCII)
+                ),
+            ]
+        )
+    )
+
+
+def model_configuration(generation=None) -> tuple[str, str, str]:
+    provider, default, key = configuration()
+    requested = generation.model if generation is not None else None
+    if requested and requested not in configured_models(provider, default):
+        raise AnalysisError(
+            "Het opgeslagen model staat buiten de serverlijst. Kies een toegestaan model in AI Settings."
+        )
+    return provider, requested or default, key
+
+
 def _request(client: httpx.Client, method: str, path: str, **kwargs) -> dict:
     for attempt in range(2 if method == "GET" else 1):
         try:
@@ -175,8 +205,8 @@ def _model_info(model: str, minute: int) -> dict:
     return entry
 
 
-def check_connection() -> dict:
-    provider, model, key = configuration()
+def check_connection(generation=None) -> dict:
+    provider, model, key = model_configuration(generation)
     if not key:
         raise AnalysisError(f"Geen API-key geconfigureerd voor {provider}.")
     if provider != "openrouter":
@@ -261,11 +291,12 @@ def chat(
         payload.pop("max_tokens")
         if generation.max_output_tokens is not None:
             payload["max_tokens"] = generation.max_output_tokens
-        payload["reasoning"] = (
-            {"enabled": False, "exclude": True}
-            if generation.reasoning_effort == "disabled"
-            else {"effort": generation.reasoning_effort, "exclude": True}
-        )
+        if generation.reasoning_effort != "provider":
+            payload["reasoning"] = (
+                {"enabled": False, "exclude": True}
+                if generation.reasoning_effort == "disabled"
+                else {"effort": generation.reasoning_effort, "exclude": True}
+            )
         if generation.temperature is not None:
             payload["temperature"] = generation.temperature
         payload["provider"] = {"require_parameters": True}
@@ -306,6 +337,9 @@ def chat(
         diagnostics = {
             "http_status": 200,
             "model": data.get("model"),
+            "routed_provider": data.get("provider")
+            if isinstance(data.get("provider"), str)
+            else None,
             "finish_reason": choice.get("finish_reason"),
             "native_finish_reason": choice.get("native_finish_reason"),
             "input_tokens": input_tokens,
@@ -466,19 +500,12 @@ def legacy_sql(response: dict) -> str | None:
 
 def unchanged_sql(original: str, candidate: str) -> bool:
     """Compare PostgreSQL structure, retaining placeholder identity and literals."""
-    import sqlglot
-    from validator.checker import PLACEHOLDER
-
-    def normalized(sql):
-        nodes = sqlglot.parse(
-            PLACEHOLDER.sub(lambda m: "'__p_" + m[1] + "'", sql), read="postgres"
-        )
-        return [node.sql(comments=False) for node in nodes if node is not None]
+    from validator.checker import SqlRejected, inspect_sql
 
     try:
-        return normalized(original) == normalized(candidate)
-    except sqlglot.errors.SqlglotError:
-        return False  # Existing static safety checks report invalid SQL separately.
+        return inspect_sql(original).canonical == inspect_sql(candidate).canonical
+    except SqlRejected:
+        return False
 
 
 def parse_analysis(text: str, *, response_version: str = "structured") -> Analysis:
@@ -544,7 +571,7 @@ def parse_analysis(text: str, *, response_version: str = "structured") -> Analys
 def analyze(
     context: dict, generation=None, *, focused: bool = False
 ) -> tuple[Analysis, dict]:
-    _, model, _ = configuration()
+    _, model, _ = model_configuration(generation)
     schema = RewriteResponse.model_json_schema()
     response = chat(
         [
@@ -557,6 +584,11 @@ def analyze(
     )
     try:
         result = parse_analysis(response["text"])
+        if result.schema_version != 2:
+            raise AnalysisError(
+                "Nieuwe analyses vereisen schema_version=2.",
+                {"error_code": "schema_validation_failed"},
+            )
         response["diagnostics"] = {
             **response.get("diagnostics", {}),
             "rewrite_requested": True,

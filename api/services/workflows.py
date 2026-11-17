@@ -1,12 +1,12 @@
-"""Allowlisted operations composed from the existing Python pipeline."""
+"""Allowlisted orchestration and historical replay."""
 
 from __future__ import annotations
 
-import os
 from time import perf_counter
 
-from api.config import Settings
+from api.config import LIVE_PROFILE_ORDERS, Settings
 from api.schemas import RunDetail
+from api.services.analysis import execute_analysis
 from api.services.artifacts import (
     Artifacts,
     CASE_MAP,
@@ -15,225 +15,60 @@ from api.services.artifacts import (
     stage,
     summarize,
 )
+from api.services.database import connect_test_database, require_confirmation
 from api.services.privacy import redact
 from api.services.storage import Store
-from llm.client import build_prompt, call_llm, extract_sql
-from query_selection.adapters import mock_telemetry, selected_cases
+from query_selection.adapters import mock_telemetry
 from query_selection.policy import SelectionPolicy
 from query_selection.selection import select_queries
+from validator.evaluation import evaluate
 
 
 def execute_run(job: dict, settings: Settings, store: Store) -> dict:
-    if job["config"]["mode"] in {"analysis", "validate"}:
-        from api.services.analysis import execute_analysis
-
-        return execute_analysis(job, settings, store)
-    if job["config"]["mode"] in {"live", "live_mock"} and not (
-        settings.enable_sql
-        and settings.test_database_confirmed
-        and job["config"].get("confirm_sql")
-    ):
-        raise ValueError(
-            "SQL-uitvoering vereist beide veiligheidsinstellingen en expliciete bevestiging."
-        )
     config, job_id = job["config"], job["id"]
+    if config["mode"] != "replay":
+        return execute_analysis(job, settings, store)
+
     case = CASE_MAP[config["query_id"]]
     selection = select_queries(mock_telemetry([case]), SelectionPolicy(top_k=1))
-    case = selected_cases(selection, [case])[0]
-    stages = [
-        stage(key, "pending", "Nog niet uitgevoerd.", "current")
-        for key in (
-            "selection",
-            "context",
-            "generation",
-            "static",
-            "correctness",
-            "benchmark",
-            "result",
-        )
-    ]
-
-    def mark(key, status, note, duration_ms=None):
-        index = next(i for i, value in enumerate(stages) if value.id == key)
-        stages[index] = stage(key, status, note, "current", duration_ms)
-        store.update(job_id, "RUNNING", progress=[s.model_dump() for s in stages])
-
-    mark(
+    source = Artifacts(settings.results_dir).replay(
+        case.name, config["condition"], config.get("source_id")
+    )
+    if source is None:
+        raise ValueError("Geen replay beschikbaar voor deze query en contextconditie.")
+    historical_run, recorded = source
+    attempt = recorded.model_copy(
+        deep=True, update={"id": f"{job_id}~0", "run_id": job_id}
+    )
+    attempt.stages[0] = stage(
         "selection",
         "passed",
-        "Bestaande query_selection toegepast op expliciet gesimuleerde workloadgegevens.",
+        "Bestaande casus geselecteerd; workloadcijfers zijn gesimuleerd.",
+        "current",
     )
-    mode, condition = config["mode"], config["condition"]
+    attempt.stages[1] = stage(
+        "context",
+        "warning" if recorded.stages[1].status == "passed" else "skipped",
+        "Historische context uit het opgeslagen artefact.",
+    )
+    attempt.stages[2] = stage(
+        "generation",
+        "skipped",
+        "Historische modelresponse hergebruikt; nul nieuwe modelrequests.",
+    )
     run = RunDetail(
         id=job_id,
-        title={
-            "replay": "Historische replay",
-            "mock": "Offline mock",
-            "live_mock": "Testdatabase / mockmodel",
-            "live": "Live POC",
-        }[mode],
-        mode=mode,
+        title="Historische replay",
+        mode="replay",
         lifecycle="COMPLETED",
         created_at=job["created_at"],
         selection=selection.to_dict(),
         limitations=LIMITATIONS,
+        source_id=historical_run.id,
+        attempts=[attempt],
+        stages=attempt.stages,
     )
-    if mode == "replay":
-        source = Artifacts(settings.results_dir).replay(
-            case.name, condition, config.get("source_id")
-        )
-        if source is None:
-            raise ValueError(
-                "Geen replay beschikbaar voor deze query en contextconditie."
-            )
-        historical_run, recorded = source
-        attempt = recorded.model_copy(deep=True)
-        attempt.id = f"{job_id}~0"
-        attempt.run_id = job_id
-        attempt.stages[0] = stages[0]
-        attempt.stages[1] = stage(
-            "context",
-            "warning" if recorded.stages[1].status == "passed" else "skipped",
-            "Opgeslagen context hergebruikt; niet opnieuw uit de database verzameld."
-            if recorded.stages[1].status == "passed"
-            else "Geen contextartefact beschikbaar; niet opnieuw opgehaald.",
-        )
-        attempt.stages[2] = stage(
-            "generation",
-            "skipped",
-            "Historische modelresponse hergebruikt; nul nieuwe modelrequests.",
-        )
-        run.source_id, run.attempts, run.stages = (
-            historical_run.id,
-            [attempt],
-            attempt.stages,
-        )
-        return summarize(run).model_dump()
-
-    mark("context", "running", "Context voor de gekozen uitvoering voorbereiden.")
-    started = perf_counter()
-    connection = None
-    try:
-        if mode == "mock":
-            blocks = {"query": case.original}
-        else:
-            import psycopg
-            from cases.cases import make_ctx
-            from llm.context import build_context
-
-            connection = psycopg.connect(
-                os.environ["SUE_DATABASE_URL"],
-                autocommit=True,
-                connect_timeout=5,
-                options="-c default_transaction_read_only=on -c statement_timeout=120000",
-            )
-            ctx = make_ctx(connection)
-            blocks = build_context(connection, case, ctx, condition)
-        # Only curated fixture SQL is sent as the original; context values are redacted.
-        blocks = {
-            key: value if key == "query" else redact(value, literals=True)
-            for key, value in blocks.items()
-        }
-        prompt = build_prompt(blocks)
-        mark(
-            "context",
-            "passed",
-            "C1 fixturecontext; geen database benaderd."
-            if mode == "mock"
-            else "Context uit de bevestigde testdatabase; waarden beperkt.",
-            (perf_counter() - started) * 1000,
-        )
-        mark(
-            "generation",
-            "running",
-            "Originele SQL via mockmodel."
-            if mode != "live"
-            else "Eén expliciet toegestaan extern modelrequest.",
-        )
-        model = os.environ["SUE_MODEL"] if mode == "live" else "mock"
-        response = call_llm(prompt, model, original_sql=case.original)
-        sql = extract_sql(response["text"])
-        mark(
-            "generation",
-            "passed",
-            "Mockresponse; geen extern request."
-            if model == "mock"
-            else "Modelresponse ontvangen; geen correctheidsbewijs.",
-            response["seconds"] * 1000,
-        )
-        from api.services.sql_safety import proposal_check
-
-        started = perf_counter()
-        ok, reason = proposal_check(sql)
-        mark(
-            "static",
-            "passed" if ok else "failed",
-            reason,
-            (perf_counter() - started) * 1000,
-        )
-        if mode == "mock" or not ok:
-            row = {
-                "case": case.name,
-                "candidate": "offline_mock",
-                "verdict": "STATIC_ONLY" if ok else "REJECTED_STATIC",
-                "param_sets": 0,
-                "detail": "Geen SQL uitgevoerd: correctheid en performance zijn niet onderzocht."
-                if ok
-                else reason,
-            }
-        else:
-            from cases.classes.candidate import Candidate
-            from scripts.run_validation import evaluate
-
-            mark(
-                "correctness",
-                "running",
-                "Bestaande evaluate() voert parametercontroles en eventueel benchmarking uit.",
-            )
-            row = evaluate(
-                connection, case, Candidate("dashboard", sql, "unknown", "llm"), ctx, 7
-            )
-        row.update(
-            {
-                "model": model,
-                "condition": condition,
-                "rep": 1,
-                "input_tokens": response["input_tokens"],
-                "output_tokens": response["output_tokens"],
-                "llm_seconds": response["seconds"],
-            }
-        )
-        attempt = adapt_attempt(
-            row,
-            job_id,
-            0,
-            response={**response, "sql": sql},
-            prompt=prompt,
-            origin="current" if mode == "mock" else "measured",
-        )
-        attempt.stages[:4] = stages[:4]
-        if mode == "mock":
-            attempt.correctness = "skipped"
-            attempt.stages[4] = stage(
-                "correctness",
-                "skipped",
-                "Offline mock: geen database-uitvoering.",
-                "current",
-            )
-            attempt.stages[5] = stage(
-                "benchmark", "skipped", "Geen nieuwe performancemeting.", "current"
-            )
-            attempt.stages[6] = stage(
-                "result",
-                "inconclusive",
-                "Alleen selectie, mockresponse en statische controle uitgevoerd; geen correctheids- of performanceconclusie.",
-                "current",
-            )
-        run.attempts, run.stages = [attempt], attempt.stages
-        return summarize(run).model_dump()
-    finally:
-        if connection is not None:
-            connection.close()
+    return summarize(run).model_dump()
 
 
 def execute_tests(job: dict, settings: Settings) -> dict:
@@ -243,22 +78,19 @@ def execute_tests(job: dict, settings: Settings) -> dict:
 
     suite_id, job_id = job["config"]["suite"], job["id"]
     if suite_id == "mutations":
-        import psycopg
-        from cases.cases import make_ctx
-        from scripts.run_validation import evaluate
-
+        require_confirmation(settings, job["config"].get("confirm_sql", False))
         case = CASE_MAP[job["config"]["query_id"]]
         records = []
-        with psycopg.connect(
-            os.environ["SUE_DATABASE_URL"],
-            autocommit=True,
-            connect_timeout=5,
-            options="-c default_transaction_read_only=on -c statement_timeout=120000",
-        ) as conn:
-            ctx = make_ctx(conn)
+        with connect_test_database() as conn:
             for index, candidate in enumerate(case.candidates):
                 started = perf_counter()
-                row = evaluate(conn, case, candidate, ctx, 7)
+                row = evaluate(
+                    conn,
+                    case,
+                    candidate,
+                    benchmark=False,
+                    recent_order_limit=LIVE_PROFILE_ORDERS,
+                )
                 attempt = adapt_attempt(
                     row, job_id, index, handwritten=True, origin="measured"
                 )

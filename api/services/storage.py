@@ -80,13 +80,17 @@ class Store:
         job_id = str(uuid4())
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if kind == "run" and config.get("mode") in {"analysis", "validate"}:
+            mode = config.get("mode")
+            if kind == "run" and mode in {"analysis", "live", "validate"}:
+                conflicting = (
+                    {"analysis", "live"} if mode != "validate" else {"validate"}
+                )
                 active = conn.execute(
                     "SELECT config FROM jobs WHERE kind='run' AND status IN ('PENDING','RUNNING')"
                 ).fetchall()
                 if any(
                     json.loads(row["config"]).get("query_id") == config.get("query_id")
-                    and json.loads(row["config"]).get("mode") == config.get("mode")
+                    and json.loads(row["config"]).get("mode") in conflicting
                     for row in active
                 ):
                     from api.services.jobs import BusyError

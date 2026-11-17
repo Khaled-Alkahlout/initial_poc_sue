@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/shared/status";
 import { Card, CardHeader } from "@/components/ui/card";
 import { ArchitectureDiagram } from "@/components/pipeline/architecture-diagram";
+import { DatabaseStatus } from "./database-status";
 import { ProviderStatus } from "./provider-status";
 
 export function ArchitectureView({ system }: { system: SystemStatus }) {
@@ -14,7 +15,10 @@ export function ArchitectureView({ system }: { system: SystemStatus }) {
         title="Architectuur & diagnostiek"
         description="Expliciete componentgrenzen maken de POC uitlegbaar en uitbreidbaar. Configuratie is geen bewijs dat een databaseverbinding of modelrequest zal slagen."
       />
-      <ProviderStatus system={system} />
+      <div className="grid-two">
+        <ProviderStatus system={system} />
+        <DatabaseStatus configured={system.database_configured} />
+      </div>
       <div className="metric-grid">
         {[
           {
@@ -23,11 +27,11 @@ export function ArchitectureView({ system }: { system: SystemStatus }) {
             note: "Deze status komt uit de API-response",
           },
           {
-            label: "Testdatabase",
-            value: "Niet getest",
+            label: "Databaseconfiguratie",
+            value: system.database_configured ? "Ingesteld" : "Onvolledig",
             note: system.database_configured
-              ? "Configuratie aanwezig; geen verbinding geopend"
-              : "Geen databaseconfiguratie aanwezig",
+              ? "Voor de Python-API"
+              : "Aanvullen in de serverconfiguratie",
           },
           {
             label: "Modelprovider",

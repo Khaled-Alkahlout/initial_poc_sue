@@ -3,8 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play } from "lucide-react";
 import { api, errorMessage } from "@/lib/api/client";
-import type { Query, RunInput, SystemStatus } from "@/lib/api/contracts";
-import { conditionLabels } from "@/lib/formatters";
+import type { Query, SystemStatus } from "@/lib/api/contracts";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/fields";
 import { Button } from "@/components/ui/button";
@@ -14,50 +13,60 @@ export function StartRun({
   system,
   label = "POC starten",
   queryId,
-  sourceId,
 }: {
   queries: Query[];
   system: SystemStatus;
   label?: string;
   queryId?: string;
-  sourceId?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const useRealModel =
-    !sourceId &&
-    system.run_modes.some((mode) => mode.id === "analysis" && mode.available);
-  const [input, setInput] = useState<RunInput>({
-    mode: useRealModel ? "analysis" : "replay",
-    query_id: queryId ?? queries[0]?.query_id ?? "",
-    condition: useRealModel ? "C4_stats" : "C2_schema",
-    source_id: sourceId,
-    confirm_sql: false,
-    confirm_external_model: false,
-  });
+  const [selectedQuery, setSelectedQuery] = useState(
+    queryId ?? queries[0]?.query_id ?? "",
+  );
+  const [confirmModel, setConfirmModel] = useState(false);
+  const [confirmSql, setConfirmSql] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const capability = system.run_modes.find((item) => item.id === input.mode);
-  function changeMode(mode: RunInput["mode"]) {
-    setInput({
-      ...input,
-      mode,
-      condition:
-        mode === "mock"
-          ? "C1_query"
-          : mode === "analysis"
-            ? "C4_stats"
-            : "C2_schema",
-      confirm_sql: false,
-      confirm_external_model: false,
-    });
+  const liveMode = system.run_modes.find((item) => item.id === "live");
+  const analysisMode = system.run_modes.find((item) => item.id === "analysis");
+  const canValidate = liveMode?.available === true;
+  const canAnalyze = canValidate || analysisMode?.available === true;
+  const statusReason = canAnalyze
+    ? liveMode?.reason
+    : (analysisMode?.reason ??
+      liveMode?.reason ??
+      "AI-analyse is momenteel niet beschikbaar.");
+  const canStart =
+    canAnalyze &&
+    selectedQuery !== "" &&
+    confirmModel &&
+    (!canValidate || confirmSql) &&
+    !busy;
+  const startLabel = canValidate ? "Live POC starten" : "AI-analyse starten";
+
+  function changeOpen(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (nextOpen) {
+      setConfirmModel(false);
+      setConfirmSql(false);
+      setError(null);
+    }
   }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (!canStart) return;
     setBusy(true);
     setError(null);
     try {
-      const run = await api.startRun(input);
+      const run = await api.startRun({
+        mode: canValidate ? "live" : "analysis",
+        query_id: selectedQuery,
+        condition: "C1_query",
+        confirm_sql: canValidate && confirmSql,
+        confirm_external_model: confirmModel,
+      });
       setOpen(false);
       router.push(`/runs/${run.id}`);
       router.refresh();
@@ -68,7 +77,7 @@ export function StartRun({
     }
   }
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
         <Button variant="outline">
           <Play size={14} />
@@ -77,42 +86,34 @@ export function StartRun({
       </DialogTrigger>
       <DialogContent
         title="POC uitvoeren"
-        description="Kies Live POC voor echt AI-advies zonder database. Replay toont bestaande resultaten. SQL-tests zijn afzonderlijk beveiligd."
+        description="Laat het ingestelde AI-model een SQL-voorstel voor de gekozen query maken."
       >
         <form className="form-grid" onSubmit={submit}>
           <label className="field">
             <span>Querycase</span>
             <Select
-              value={input.query_id}
-              onChange={(e) => setInput({ ...input, query_id: e.target.value })}
+              value={selectedQuery}
+              onChange={(e) => setSelectedQuery(e.target.value)}
             >
               {queries.map((query) => (
                 <option key={query.query_id}>{query.query_id}</option>
               ))}
             </Select>
           </label>
-          <label className="field">
+          <div className="field">
             <span>Uitvoermodus</span>
-            <Select
-              value={input.mode}
-              onChange={(e) => changeMode(e.target.value as RunInput["mode"])}
-            >
-              {system.run_modes
-                .filter((item) => item.id !== "validate")
-                .map((item) => (
-                  <option
-                    key={item.id}
-                    value={item.id}
-                    disabled={!item.available}
-                  >
-                    {item.label}
-                    {!item.available ? " · niet beschikbaar" : ""}
-                  </option>
-                ))}
-            </Select>
-          </label>
-          <p className="notice notice-blue">{capability?.reason}</p>
-          {capability?.external_model && (
+            <strong className="text-sm">Live POC</strong>
+          </div>
+          <p className="notice notice-blue">
+            {canAnalyze && !canValidate && (
+              <>
+                Je kunt de AI-analyse starten. Correctheid en Benchmark vereisen
+                een geconfigureerde testdatabase.{" "}
+              </>
+            )}
+            {statusReason}
+          </p>
+          {canAnalyze && (
             <p className="text-xs muted">
               Provider:{" "}
               <strong>{system.provider ?? "ingesteld op de server"}</strong> ·
@@ -123,59 +124,30 @@ export function StartRun({
               . Eén verzoek na jouw bevestiging.
             </p>
           )}
-          <label className="field">
-            <span>Contextconditie</span>
-            <Select
-              value={input.condition}
-              onChange={(e) =>
-                setInput({
-                  ...input,
-                  condition: e.target.value as RunInput["condition"],
-                })
-              }
-            >
-              {Object.entries(conditionLabels).map(([key, text]) => (
-                <option
-                  key={key}
-                  value={key}
-                  disabled={input.mode === "mock" && key !== "C1_query"}
-                >
-                  {text}
-                </option>
-              ))}
-            </Select>
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={confirmModel}
+              onChange={(e) => setConfirmModel(e.target.checked)}
+              disabled={!canAnalyze}
+              required
+            />
+            <span>
+              Ik geef toestemming om de gekozen query naar het AI-model te
+              sturen en ga akkoord met mogelijke AI-kosten.
+            </span>
           </label>
-          {capability?.executes_sql && (
+          {canValidate && (
             <label className="check-field">
               <input
                 type="checkbox"
-                checked={input.confirm_sql}
-                onChange={(e) =>
-                  setInput({ ...input, confirm_sql: e.target.checked })
-                }
+                checked={confirmSql}
+                onChange={(e) => setConfirmSql(e.target.checked)}
                 required
               />
               <span>
-                Ik bevestig SQL-uitvoering op de geïsoleerde testdatabase,
-                inclusief eventuele profiling en benchmarks.
-              </span>
-            </label>
-          )}
-          {capability?.external_model && (
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={input.confirm_external_model}
-                onChange={(e) =>
-                  setInput({
-                    ...input,
-                    confirm_external_model: e.target.checked,
-                  })
-                }
-                required
-              />
-              <span>
-                Ik bevestig één extern modelrequest met mogelijke kosten.
+                Ik bevestig de read-only correctheidscontrole en benchmark op de
+                geïsoleerde testdatabase.
               </span>
             </label>
           )}
@@ -192,22 +164,8 @@ export function StartRun({
             >
               Annuleren
             </Button>
-            <Button
-              type="submit"
-              disabled={
-                busy ||
-                !capability?.available ||
-                (capability.external_model && !input.confirm_external_model) ||
-                (capability.executes_sql && !input.confirm_sql)
-              }
-            >
-              {busy
-                ? "In wachtrij zetten…"
-                : input.mode === "replay"
-                  ? "Replay starten"
-                  : input.mode === "analysis"
-                    ? "Echte AI-analyse starten"
-                    : "Run starten"}
+            <Button type="submit" disabled={!canStart}>
+              {busy ? "In wachtrij zetten…" : startLabel}
             </Button>
           </div>
         </form>

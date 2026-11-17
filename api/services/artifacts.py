@@ -17,12 +17,13 @@ from llm.client import HEADERS
 CASE_MAP = {case.name: case for case in CASES}
 LIMITATIONS = [
     "Correctheid geldt alleen voor geteste data en parameters; geen algemeen bewijs van SQL-equivalentie.",
-    "De legacy-validator kan ties te ruim toestaan en resultaatwaarden gelijk normaliseren. Ambigue resultaten worden hier niet als succes getoond.",
+    "Historische metingen gebruiken de oorspronkelijke validator en meetmethode.",
     "Benchmarktijden zijn metingen op een testdataset; mockworkloadcijfers beschrijven geen gemeten databasebelasting.",
     "Geen productiegoedkeuring, automatisch indexbeheer of tweede controle-agent.",
 ]
 STAGE_LABELS = {
     "selection": "Queryselectie",
+    "input_check": "Originele SQL",
     "context": "Context voorbereiden",
     "generation": "LLM-generatie",
     "static": "Statische SQL-controle",
@@ -30,6 +31,8 @@ STAGE_LABELS = {
     "benchmark": "Performancebenchmark",
     "result": "Eindresultaat",
 }
+
+RUN_STAGES = tuple(STAGE_LABELS)
 
 
 def stage(
@@ -121,7 +124,18 @@ def adapt_attempt(
     condition = row.get("condition") if row.get("condition") in CONDITIONS else None
     verdict = row.get("verdict") if isinstance(row.get("verdict"), str) else None
     sets, failing = integer(row, "param_sets"), integer(row, "failing_param_sets")
-    if verdict == "REJECTED_STATIC":
+    observed = "correctness_status" in row
+    if observed:
+        outcome = {
+            "ACCEPTED": "accepted",
+            "EQUIVALENT_NOT_FASTER": "not_faster",
+            "REJECTED_STATIC": "safety_rejected",
+            "REJECTED_NOT_EQUIVALENT": "mismatch",
+            "VALIDATION_ERROR": "error",
+            "BENCHMARK_ERROR": "error",
+        }.get(verdict, "inconclusive")
+        correctness = row["correctness_status"]
+    elif verdict == "REJECTED_STATIC":
         outcome, correctness = "safety_rejected", "skipped"
     elif "EXEC_ERROR" in detail:
         outcome, correctness = "error", "error"
@@ -168,11 +182,15 @@ def adapt_attempt(
     if outcome in {"accepted", "not_faster"} and not measured:
         outcome = "inconclusive"
     benchmark_status = (
-        ("passed" if outcome == "accepted" else "warning")
-        if measured and correctness == "passed"
-        else "inconclusive"
-        if measured
-        else "skipped"
+        row["benchmark_status"]
+        if observed
+        else (
+            ("passed" if outcome == "accepted" else "warning")
+            if measured and correctness == "passed"
+            else "inconclusive"
+            if measured
+            else "skipped"
+        )
     )
     benchmark = Benchmark(
         original_ms=original_ms,
@@ -248,7 +266,7 @@ def adapt_attempt(
             (
                 "Geregistreerde medianen en spreiding; geen nieuwe meting."
                 if origin == "historical"
-                else "Nieuwe meting door de bestaande benchmark; fase-duur niet afzonderlijk vastgelegd."
+                else "Mediane duur en spreiding uit gepaarde metingen op de testdatabase."
             )
             if measured
             else "Geen benchmark beschikbaar.",
@@ -257,7 +275,7 @@ def adapt_attempt(
         stage(
             "result",
             final_status,
-            "Oordeel binnen de geteste voorwaarden; legacy-oordeel blijft apart zichtbaar.",
+            detail if observed else "Oordeel binnen de geregistreerde testvoorwaarden.",
             origin,
         ),
     ]
@@ -302,6 +320,7 @@ def adapt_attempt(
         detail=redact(detail),
         parameter_sets=sets,
         failing_parameter_sets=failing,
+        parameter_checks=row.get("parameter_checks", []),
         input_tokens=integer(row, "input_tokens"),
         output_tokens=integer(row, "output_tokens"),
         llm_seconds=llm_seconds,

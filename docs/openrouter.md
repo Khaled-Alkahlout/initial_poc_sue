@@ -1,45 +1,26 @@
-# OpenRouter-analyse en afzonderlijke validatie
+# OpenRouter-analyse en validatie op een testdatabase
 
 Voor configureerbare tokenlimieten, reasoning, persistente voorkeuren en volledige
 responsdiagnostiek: [AI Settings](ai-settings.md). Het SQL-analysepad gebruikt nu
 standaard 4096 tokens en low effort. De nieuwe Settings-verbindingstest doet één
 klein betaald generatieverzoek; de oorspronkelijke key/catalogustest blijft kosteloos.
 
-Deze wijziging bouwt voort op Next.js/React/TypeScript, FastAPI/Pydantic,
-`query_selection/`, de vier bestaande cases, de artifactadapter en SQLite.
-De oorspronkelijke validator en experimentele CLI-workflows blijven behouden.
+## Keuzes bij de overdracht
 
-## Wat is veranderd?
+| Onderdeel | Geïntegreerd gedrag |
+| --- | --- |
+| Softwarechecks | De bestaande selectie en casussen blijven de ingang. De gedeelde PostgreSQL-parser controleert het origineel en de kandidaat, inclusief bindingsnamen, tabellen, functies en sorteersleutels. |
+| Databaseconnectie | Een taakgebonden psycopg-verbinding gebruikt de bestaande serverconfiguratie, time-outs en een read-only snapshot met rollback. |
+| Model en reasoning | De server bepaalt het aanbod. **AI Settings** bewaart het gekozen model en de opties. De worker ontvangt een snapshot van die voorkeuren en controleert modelmogelijkheden vóór generatie. |
+| LLM-koppeling | De bestaande OpenRouter-client vraagt één strikt JSON-antwoord op en bewaart beschikbare gebruiksmetadata. Het pakket gebruikt lossere tekstextractie en betaalde retries. De directe Anthropic-client hoort bij de CLI-experimenten. |
+| Queryanalyse | C1–C4 hergebruiken de contextopbouw. Live C3 deelt een geschat plan en C4 alleen samengevatte statistieken. Dezelfde modelcall geeft diagnose, rewrite en onderbouwing. |
+| Validatie | Volledige runs en opgeslagen voorstellen volgen dezelfde evaluator. Gecontroleerde SQL, toegestane casustabellen en een geldig parameterprofiel zijn vereist. |
+| Vergelijking | Kolomtypen, rijmultiset, volgorde en timingparameters worden in dezelfde snapshot gecontroleerd. Meetparen wisselen af welk statement als eerste start. |
+| Besluit | `ACCEPTED` vereist volledige correctheid en voldoende snelheidsbewijs. Afwijkingen, onvoldoende bewijs en uitvoeringsfouten hebben aparte statussen. |
 
-- `llm/analysis.py`: OpenRouter HTTP-client, exact model controleren, beperkt
-  JSON-schema, Pydantic-validatie, timeouts, veilige fouten en usage/kostenmetadata.
-- `api/services/analysis.py`: selectie → geredigeerde historische context → één
-  modelcall → statische controle → ongetest advies opslaan. Geen database vereist.
-- Afzonderlijke `validate`-run: leest uitsluitend het opgeslagen voorstel,
-  controleert veiligheidsinstellingen en voert bestaande `evaluate()` uit.
-- Querydetail is nu de Analysis Workspace, met expliciet **Analyze with AI**,
-  voortgang, verklaring, risico's, SQL-vergelijking en aparte validatieactie.
-- Analysehistorie gebruikt dezelfde runopslag. Reviews blijven afzonderlijk.
-- Systeemstatus toont provider/model en SQL-instellingen; de OpenRouter-test
-  controleert key en catalogus zonder betaalde generatie of databasequery.
-- Explorer heeft metricfilters en paginering van 25 rijen. Filtering en ranking
-  blijven Python-logica; presentatiefilters wijzigen geen analysebeleid.
-
-```mermaid
-flowchart TD
-    Query["Query Explorer → Analysis Workspace"] --> API["POST /api/runs · analysis"]
-    API --> Queue["Begrensde worker + deduplicatie"]
-    Queue --> Select["Bestaande filtering + prioritering"]
-    Select --> Context["Fixture-SQL + geredigeerde historische context"]
-    Context --> Model["OpenRouter: exact geconfigureerd model"]
-    Model --> Contract["JSON-schema + Pydantic + SQL-admission"]
-    Contract --> Store[("SQLite: ongetest advies + metadata")]
-    Store --> UI["Uitleg, SQL-vergelijking, risico's"]
-    UI -->|"apart bevestigd"| Validate["POST /api/runs · validate"]
-    Validate --> Gates["Beide SQL-flags + bevestiging + static checks"]
-    Gates --> DB[("Geïsoleerde testdatabase · read-only")]
-    DB --> Result["Correctheid en benchmark afzonderlijk"]
-```
+De bestaande FastAPI-worker bewaart voortgang, voorstellen en testbewijs in
+SQLite. Query Explorer, Analysis Workspace en Run Details lezen dezelfde
+contracten. Een medewerker kan een voorstel beoordelen via de bestaande review.
 
 ## Configuratie en installatie
 
@@ -63,17 +44,19 @@ SUE_MODEL=anthropic/claude-haiku-5.5
 OPENROUTER_API_KEY=
 ```
 
+`SUE_MODEL` is de standaard. Vul optioneel `SUE_ALLOWED_MODELS` met een
+kommagescheiden lijst van extra volledige OpenRouter-ID's. Na een API-herstart
+verschijnen de opties in **AI Settings**. Het gekozen model moet gestructureerde
+uitvoer en de gekozen generatieopties ondersteunen.
+
 FastAPI laadt `.env` uit de repositoryhoofdmap met `override=False`:
 procesvariabelen hebben voorrang. Herstart de API na configuratiewijzigingen.
 De worker erft dezelfde configuratie. Keys gaan uitsluitend server-side mee in
 de Authorization-header, nooit naar frontendcontracten of commandline-argumenten.
 `.env` blijft door Git genegeerd; alleen `.env.example` is versieerbaar.
 
-Voor directe Anthropic-backward compatibility kies je expliciet
-`SUE_LLM_PROVIDER=anthropic`, een rechtstreeks Anthropic-model-ID en
-`ANTHROPIC_API_KEY`. De keys worden niet uitgewisseld of als fallback gebruikt.
-Zonder expliciete provider wordt een model-ID met `/` als OpenRouter behandeld;
-een legacy-model-ID zonder `/` als directe Anthropic-configuratie.
+De dashboardflow gebruikt `SUE_LLM_PROVIDER=openrouter`. Voor directe Anthropic
+gebruikt de bestaande CLI een direct model-ID en `ANTHROPIC_API_KEY`.
 
 Het opgegeven ID `anthropic/claude-haiku-5.5` is op 3 november 2026 aangetroffen
 in de [officiële modelcatalogus](https://openrouter.ai/api/v1/models), met
@@ -89,11 +72,11 @@ Er is geen extra OpenAI SDK nodig; `httpx` verzorgt de compatibele HTTP-aanroep.
 
 ## Lokaal starten en demonstreren zonder database
 
-**POC starten** kiest standaard **Live POC · echt AI-advies (zonder database)**
-wanneer model, providerkey en LLM-enablement aanwezig zijn. De aparte modus
-**AI + databasevalidatie · experimenteel** vereist ook de testdatabase. Een
-ontbrekende testdatabase blokkeert dus geen echt AI-advies. Replay blijft
-handmatig selecteerbaar en start geen extern modelrequest.
+Gebruik **POC starten** of **Analyze with AI** bij de query. Bevestig de mogelijke
+AI-kosten om de analyse te starten. Met een ingestelde testdatabase vraagt
+**POC starten** ook toestemming voor Correctheid en Benchmark. Zonder
+testdatabase voert het scherm alleen de AI-analyse uit. Historische resultaten
+staan onder **Analysehistorie**.
 
 Een OpenRouter-key hoort onder `OPENROUTER_API_KEY`, ook voor een Anthropic-model.
 Een key onder de verkeerde providernaam geeft een gerichte configuratiefout;
@@ -130,18 +113,18 @@ Mock/replay worden nooit als nieuwe AI-generatie gepresenteerd.
 
 ## Output, begrenzing en kosten
 
-Het model levert negen velden: `problem`, `root_cause`, `optimized_sql`
-(nullable), `index_recommendations`, `expected_benefit`, `correctness_risks`,
-`uncertainty`, `validation_recommendations` en `missing_context`.
-Extra velden, verkeerde typen, te grote of afgekapt ontvangen antwoorden worden
-afgewezen. Er volgt geen automatische LLM-feedback- of herstelcall.
+Het model levert het bestaande analyseschema v2, inclusief
+`rewrite_status`, `rewrite_explanation` en één kandidaat in `optimized_sql`.
+Een gemotiveerde uitkomst zonder voorstel krijgt een eigen status. Ongeldige
+of afgeknotte uitvoer geeft een fout met beschikbare diagnostiek.
 
-Eén case wordt vóór contextopbouw geselecteerd met de bestaande module. De bron
-is voorlopig de mockadapter; er is geen nieuwe telemetrycollector of SQL-upload.
-Historische context is expliciet als mogelijk verouderd gemarkeerd, per blok tot
-8000 tekens beperkt en geredigeerd. De exacte tekstblokken staan bij de analyse.
-Ontbrekende context wordt niet live opgehaald. SQL-literals/parameters worden
-niet stilzwijgend veranderd; een voorstel met gevoelige waarden wordt afgewezen.
+De server selecteert één geregistreerde casus. Voor een extra query voeg je op de
+server een SQL-bestand, sorteercontract en parameterprofiel toe aan `cases/`.
+AI-analyse zonder testdatabase gebruikt C1, met casus-SQL en als zodanig
+gelabelde fictieve workload. Live context deelt voor C2 kolom- en indexmetadata,
+voor C3 geschatte plannodes uit `EXPLAIN (FORMAT JSON)` en voor C4 alleen
+aggregaten uit de statistieken. Plandelen met predicates, resultaatsrijen,
+parameterwaarden en lijsten met veelvoorkomende waarden blijven server-side.
 
 Model, provider, duur, tokens en kosten worden opgeslagen waar beschikbaar.
 Providerkosten hebben het label gerapporteerd. Anders kan een schatting op basis
@@ -159,30 +142,84 @@ dezelfde query, ook bij dubbele HTTP-aanvragen.
 
 ## Een geïsoleerde testdatabase aansluiten
 
-Bereid de bestaande Bazaar-fixtures voor volgens de oorspronkelijke README.
-Gebruik een aparte, uitsluitend voor tests bestemde database, met beperkte rol.
-Installeer `psycopg[binary]` en configureer server-side:
+Gebruik een geïsoleerde testdatabase met de bestaande casustabellen in `public`.
+Het overdrachtspakket bevat een kleine synthetische fixture voor een lege,
+wegwerpbare database in `transfer_package/tests/fixtures/synthetic.sql`.
+Gebruik voor de toepassing een rol met SELECT op de casustabellen en zonder
+CREATE- of TEMP-rechten. Installeer `psycopg[binary]` en configureer server-side:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install "psycopg[binary]"
+```
 
 ```dotenv
 SUE_ENABLE_SQL_RUNS=1
 SUE_TEST_DATABASE_CONFIRMED=1
-SUE_DATABASE_URL=postgresql://restricted_test_role:...@localhost:5432/dedicated_test_db
+SUE_DATABASE_URL=
 ```
 
-Herstart de API. Open een opgeslagen AI-analyse en bevestig de afzonderlijke
-validatieactie. Alleen de opgeslagen SQL wordt getest; indexadviezen worden
-nooit uitgevoerd. Multi-statements, DDL, INTO, locks en onbekende functies worden
-afgewezen vóór verbinding voor deze route. De verbinding is standaard read-only,
-met connect-timeout 5 s en statement-timeout 120 s. De bestaande validator gebruikt
-bovendien read-only transacties met rollback. Benchmarking gebruikt zeven
-herhalingen wanneer de bestaande evaluator die fase toestaat.
+Vul `SUE_DATABASE_URL` in met de DSN voor de geïsoleerde testdatabase, inclusief
+de TLS-instellingen die deze database vereist. Voor AWS RDS kun je ook
+`ENDPOINT`, `PORT`, `DB_NAME`, `DB_USER` en `DB_PASS` in de server-side `.env`
+zetten. Laat `SUE_DATABASE_URL` leeg om deze velden te gebruiken. Hiermee
+controleert PostgreSQL het servercertificaat en de hostnaam met `verify-full`.
+Download de CA-bundel voor jouw regio en geef het pad naar het PEM-bestand op
+in `PGSSLROOTCERT`. [AWS RDS CA-bundels](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)
+
+Herstart de API na het wijzigen van `.env`. Procesvariabelen gaan voor op dit
+bestand. Gebruik een host en poort die vanuit Python bereikbaar zijn. Binnen
+een container wijst `localhost` naar die container.
+
+Kies **Systeemstatus → Databaseverbinding testen** om de verbinding en de
+leesrechten op de casustabellen afzonderlijk te controleren. De test gebruikt
+`SELECT 1`, schemametadata en `LIMIT 0` en is ook beschikbaar als de
+runvalidatie uitstaat. Schakel beide SQL-vlaggen in voor een geïsoleerd testdoel.
+
+Bevestig de modelaanroep en testuitvoering in **Live POC** of via **Analyseer en
+valideer** bij de query. De worker doet eerst `SELECT 1` en controleert toegang
+tot de casustabellen in `public`, inclusief `orders` voor het parameterprofiel.
+Een verbindings- of schemafout stopt de run voordat het model wordt aangeroepen.
+De serverlog vermeldt het run-ID, de fase en foutcategorie, met SQLSTATE wanneer
+PostgreSQL dat levert.
+
+Onder **Optimization Results** staan de geteste parametersets en de mediane
+tijden. Voor een eerder opgeslagen voorstel kun je **Correctheid & performance
+testen** gebruiken. De benchmark wordt overgeslagen bij een resultaatverschil of
+ontoereikend correctheidsbewijs. De oorzaak staat bij de fase.
+
+Dashboardruns leiden tijdvensters af uit maximaal 512 recente orders. Zo hoeft
+de voorbereiding geen volledige orderhistorie te groeperen. De metingen gelden
+voor de daaruit afgeleide parameters op deze database.
+
+De verbinding heeft een connect-timeout van 5 s. Vergelijking gebruikt één
+`REPEATABLE READ READ ONLY`-snapshot met een statement-timeout van 2 s en een
+slotwachttijd van 500 ms. Een servercursor haalt maximaal 2.001 rijen op. Bij
+meer dan 2.000 rijen stopt de vergelijking zonder oordeel. Voor de benchmark
+moeten alle sets slagen, inclusief de timingparameters. Die set moet rijen
+opleveren en beide queries moeten binnen 500 ms blijven. De benchmark gebruikt
+zes paren met afwisselende startvolgorde en 500 ms statement-timeout.
+`ACCEPTED` vereist minstens 1,2× winst op zowel de medianen als de grens tussen
+het eerste kwartiel van het origineel en het derde kwartiel van het voorstel.
+Deze meetregel is indicatief voor de gebruikte testdata en meetomgeving.
 
 Beide flags én browserbevestiging worden server-side gecontroleerd. Een flag is
 een operatorverklaring: software kan daarmee niet bewijzen dat een URI werkelijk
 geen productieomgeving is. Configureer deze POC daarom uitsluitend voor een
 geïsoleerd testdoel en bind hem lokaal, zonder publieke toegang.
 
-## Testbewijs en resterende beperkingen
+## Testen
+
+De backendsuite gebruikt standaard offline testgrenzen. Voor de aanvullende
+PostgreSQL-tests stel je `SUE_SYNTHETIC_TEST_DSN` in op een reeds gevulde,
+wegwerpbare testdatabase met de synthetische fixture. De tests gebruiken echte
+psycopg-transacties en één echte worker. Het modeltransport in deze suite is
+gesimuleerd.
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest discover -s tests -v
+```
+
+### Historische dashboardcontrole
 
 Gecontroleerd op 3 november 2026:
 
@@ -208,11 +245,8 @@ deduplicatie, SQL-gates en validatiestatussen hebben onafhankelijke tests zonder
 API-key, PostgreSQL of AWS. De browserchecks gebruiken de offline demo. Er is bij
 deze wijziging geen echte modelgeneratie of databasebenchmark uitgevoerd.
 
-De validator blijft de bestaande implementatie. Bekende beperkingen rond ties,
-normalisatie en foutclassificatie worden conservatief zichtbaar gemaakt via de
-adapter; deze wijziging levert geen formeel equivalentiebewijs. Een onbekende
-functie wordt voor de nieuwe testactie conservatief geweigerd, ook als die in
-een specifieke database veilig zou kunnen zijn.
+Historische artefacten tonen het oordeel en de meetmethode van hun oorspronkelijke
+run. Nieuw correctheidsbewijs geldt voor de geteste parameters en database.
 
 Echte workloadmonitoring/import, algemene query-equivalentie, automatische
 indexcreatie, publieke authenticatie en een production optimizer blijven buiten

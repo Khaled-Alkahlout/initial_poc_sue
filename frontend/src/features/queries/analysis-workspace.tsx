@@ -22,12 +22,16 @@ export function AnalysisWorkspace({
   const [run, setRun] = useState<Run | null>(null);
   const [busy, setBusy] = useState(false);
   const [consent, setConsent] = useState(false);
+  const [confirmSql, setConfirmSql] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const capability = system.run_modes.find((mode) => mode.id === "analysis");
+  const fullRun = system.run_modes.find(
+    (mode) => mode.id === "live" && mode.available,
+  );
   const storedAnalysisId = query.runs.find(
-    (item) => item.mode === "analysis",
+    (item) => item.mode === "analysis" || item.mode === "live",
   )?.id;
   const previous = query.attempts.find(
     (attempt) => attempt.analysis || attempt.diagnostics?.error_code,
@@ -44,12 +48,13 @@ export function AnalysisWorkspace({
   const previousRunId =
     storedAnalysisId ?? previous?.run_id ?? experiment?.run_id;
   const validationId =
-    run?.mode === "analysis"
+    run?.mode === "analysis" || run?.mode === "live"
       ? query.runs.find(
           (item) =>
             item.mode === "validate" &&
             item.source_id === run.id &&
-            item.lifecycle === "COMPLETED",
+            (item.lifecycle === "COMPLETED" || item.lifecycle === "FAILED") &&
+            item.attempt_count > 0,
         )?.id
       : undefined;
   const validation = validationId
@@ -76,16 +81,17 @@ export function AnalysisWorkspace({
 
   async function start(rewriteOnly = false) {
     if (busy || pending || !consent || !capability?.available) return;
+    const validate = !rewriteOnly && !!fullRun && confirmSql;
     setBusy(true);
     setRequestError(null);
     try {
       setRun(
         await api.startRun({
-          mode: "analysis",
+          mode: validate ? "live" : "analysis",
           ...(rewriteOnly ? { rewrite_only: true, source_id: run?.id } : {}),
           query_id: query.query_id,
-          condition: "C4_stats",
-          confirm_sql: false,
+          condition: validate ? "C4_stats" : "C1_query",
+          confirm_sql: validate,
           confirm_external_model: consent,
         }),
       );
@@ -95,16 +101,25 @@ export function AnalysisWorkspace({
       setBusy(false);
     }
   }
-  const canRewrite = run?.mode === "analysis" && !pending;
+  const canRewrite =
+    (run?.mode === "analysis" || run?.mode === "live") &&
+    !!latestAttempt &&
+    !pending;
   return (
     <section className="stack" aria-label="AI Analysis Workspace">
       <Card className="analysis-controls">
         <CardHeader
           title="Analyze with AI"
-          description="Genereer advies op basis van de query en beschikbare geredigeerde context."
+          description="Analyseer de query en genereer een onderbouwd SQL-voorstel."
           action={
             system.configured_model && (
-              <span className="model-pill mono">{system.configured_model}</span>
+              <Link
+                className="model-pill mono"
+                href="/settings"
+                title="Model en reasoning instellen"
+              >
+                {system.configured_model}
+              </Link>
             )
           }
         />
@@ -118,17 +133,35 @@ export function AnalysisWorkspace({
                   onChange={(event) => setConsent(event.target.checked)}
                 />
                 <span>
-                  Ik bevestig één extern AI-request met geredigeerde context en
-                  mogelijke kosten. SQL-validatie is een aparte stap.
+                  Ik bevestig één extern AI-request met de casus-SQL en
+                  mogelijke kosten. Bij een volledige run gaat ook beperkte
+                  testdatabasemetadata mee.
                 </span>
               </label>
+              {fullRun && (
+                <label className="check-field">
+                  <input
+                    type="checkbox"
+                    checked={confirmSql}
+                    onChange={(event) => setConfirmSql(event.target.checked)}
+                  />
+                  <span>
+                    Ik bevestig ook correctheidscontrole en een begrensde
+                    benchmark op de geïsoleerde testdatabase.
+                  </span>
+                </label>
+              )}
               <div className="page-actions">
                 <Button
                   onClick={() => start()}
                   disabled={busy || pending || !consent}
                 >
                   <Sparkles size={16} />{" "}
-                  {busy ? "Analyse starten…" : "Analyze with AI"}
+                  {busy
+                    ? "Analyse starten…"
+                    : fullRun && confirmSql
+                      ? "Analyseer en valideer"
+                      : "Analyze with AI"}
                 </Button>
                 {canRewrite && (
                   <Button
@@ -161,11 +194,12 @@ export function AnalysisWorkspace({
               {requestError}
             </p>
           )}
-          {run?.mode === "analysis" && latestAttempt && (
-            <Link className="text-link" href={"/runs/" + run.id}>
-              Open deze analyse <ArrowUpRight size={12} />
-            </Link>
-          )}
+          {(run?.mode === "analysis" || run?.mode === "live") &&
+            latestAttempt && (
+              <Link className="text-link" href={"/runs/" + run.id}>
+                Open deze analyse <ArrowUpRight size={12} />
+              </Link>
+            )}
         </div>
       </Card>
       {!run && loadError && (

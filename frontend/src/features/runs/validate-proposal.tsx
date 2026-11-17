@@ -69,7 +69,8 @@ export function ValidateProposal({
             ? "Beschikbaarheid van testdatabasevalidatie controleren…"
             : allowed?.available
               ? "SQL-uitvoering beschikbaar op het door de operator bevestigde testdoel."
-              : "Validatie niet beschikbaar. Beide SQL-veiligheidsinstellingen, een geïsoleerde testdatabase en psycopg zijn vereist. AI-advies blijft bruikbaar voor menselijke review."}
+              : (allowed?.reason ??
+                "Beschikbaarheid van validatie kon niet worden vastgesteld.")}
         </p>
         {allowed?.available && (
           <label className="check-field">

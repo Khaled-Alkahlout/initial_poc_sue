@@ -11,8 +11,30 @@ from starlette.responses import JSONResponse
 from pydantic import ValidationError
 
 from api.services.runtime import RuntimeMismatch
+from validator.postgres_errors import MESSAGES, PHASES, safe_sqlstate
 
 logger = logging.getLogger("sue.api")
+
+
+def log_database_failure(job):
+    for attempt in (job.get("result") or {}).get("attempts", []):
+        issue = (attempt.get("raw_record") or {}).get("database_error")
+        if not isinstance(issue, dict):
+            continue
+        code, phase = issue.get("code"), issue.get("phase")
+        if (
+            isinstance(code, str)
+            and code in MESSAGES
+            and isinstance(phase, str)
+            and phase in PHASES
+        ):
+            logger.warning(
+                "postgres_failure run_id=%s phase=%s code=%s sqlstate=%s",
+                job["id"],
+                phase,
+                code,
+                safe_sqlstate(issue.get("sqlstate")) or "-",
+            )
 
 
 def validation_locations(exc):

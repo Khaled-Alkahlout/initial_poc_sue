@@ -21,6 +21,7 @@ import {
 
 const definition = [
   { id: "selection", label: "Queryselectie", icon: Filter },
+  { id: "input_check", label: "Originele SQL", icon: FileCode2 },
   { id: "context", label: "Context", icon: Layers },
   { id: "generation", label: "LLM-generatie", icon: Sparkles },
   { id: "static", label: "SQL-controle", icon: FileCode2 },

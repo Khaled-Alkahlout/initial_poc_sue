@@ -83,6 +83,35 @@ test("zero or invalid baseline cannot produce a percentage", () => {
   ).toBeNull();
 });
 
+test("mislukte benchmark toont de eerder gemeten correctheid en geen verbetering", async () => {
+  const user = userEvent.setup();
+  const row = attempt({
+    outcome: "error",
+    benchmark: {
+      ...attempt().benchmark,
+      status: "error",
+      original_ms: null,
+      proposed_ms: null,
+    },
+    parameter_checks: [
+      {
+        label: "big/full",
+        status: "EQUIVALENT",
+        detail: "Kolommen, waarden en volgorde komen overeen.",
+        original_rows: 3,
+        proposed_rows: 3,
+      },
+    ],
+  });
+  render(<OptimizationResults attempt={row} />);
+  expect(screen.getByText("Benchmark mislukt")).toBeVisible();
+  expect(screen.queryByText("Gevalideerde verbetering")).toBeNull();
+  await user.click(screen.getByText("Resultaten per parameterset"));
+  expect(
+    screen.getByRole("row", { name: /big\/full 3 3 Kolommen/ }),
+  ).toBeVisible();
+});
+
 test("technical disclosure retains recorded usage, cost basis and long redacted plans", async () => {
   const explain = "Seq Scan with Filter ".repeat(600);
   const row = attempt({

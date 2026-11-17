@@ -19,6 +19,9 @@ const correctnessLabels: Partial<Record<Attempt["correctness"], string>> = {
 export function PerformanceComparison({ attempt }: { attempt: Attempt }) {
   const measured = compareBenchmark(attempt);
   if (!measured) {
+    const benchmarkNote = attempt.stages.find(
+      (stage) => stage.id === "benchmark",
+    )?.note;
     return (
       <div className="evidence-card">
         <div className="evidence-heading">
@@ -26,15 +29,17 @@ export function PerformanceComparison({ attempt }: { attempt: Attempt }) {
           <h3>Performancebenchmark</h3>
         </div>
         <p className="evidence-value">
-          {attempt.benchmark.original_ms != null &&
-          attempt.benchmark.proposed_ms != null
-            ? "Metingen onvergelijkbaar"
-            : "Not benchmarked"}
+          {attempt.benchmark.status === "error"
+            ? "Benchmark mislukt"
+            : attempt.benchmark.original_ms != null &&
+                attempt.benchmark.proposed_ms != null
+              ? "Metingen onvergelijkbaar"
+              : "Not benchmarked"}
         </p>
         <p className="muted text-sm">Geen onderbouwde performanceconclusie</p>
         <p className="muted text-xs mt-2">
-          Een vergelijkbare meting vereist twee geldige medianen en een
-          geslaagde correctheidscontrole.
+          {benchmarkNote ||
+            "Een vergelijkbare meting vereist twee geldige medianen en een geslaagde correctheidscontrole."}
         </p>
       </div>
     );
@@ -166,6 +171,35 @@ export function OptimizationResults({
         </div>
         <PerformanceComparison attempt={attempt} />
       </div>
+      {!!attempt.parameter_checks?.length && (
+        <div className="panel-body">
+          <details className="inspector">
+            <summary>Resultaten per parameterset</summary>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Set</th>
+                    <th scope="col">Rijen origineel</th>
+                    <th scope="col">Rijen voorstel</th>
+                    <th scope="col">Vergelijking</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attempt.parameter_checks.map((check) => (
+                    <tr key={check.label}>
+                      <th scope="row">{check.label}</th>
+                      <td>{count(check.original_rows)}</td>
+                      <td>{count(check.proposed_rows)}</td>
+                      <td>{check.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      )}
     </Card>
   );
 }
