@@ -19,6 +19,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check GitHub OIDC identity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, json, base64, urllib.request
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
+          token = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+          request = urllib.request.Request(
+              url + "&audience=sts.amazonaws.com",
+              headers={"Authorization": "Bearer " + token}
+          )
+          jwt = json.load(urllib.request.urlopen(request))["value"]
+          payload = jwt.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          print("Audience:", claims.get("aud"))
+          print("Subject:", claims.get("sub"))
+          PY
+
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
