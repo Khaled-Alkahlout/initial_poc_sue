@@ -172,7 +172,7 @@ test("AI-workspace toont configuratie en vraagt expliciete bevestiging", async (
 }) => {
   await page.goto("/queries/top_products");
   await expect(
-    page.getByRole("heading", { name: "Analyze with AI", exact: true }),
+    page.getByRole("heading", { name: "SQL-analyse", exact: true }),
   ).toBeVisible();
   await page.locator("#ai-workspace").scrollIntoViewIfNeeded();
   await page.screenshot({
@@ -183,7 +183,7 @@ test("AI-workspace toont configuratie en vraagt expliciete bevestiging", async (
     page.getByText("Gesimuleerd", { exact: true }).first(),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Analyze with AI", exact: true }),
+    page.getByRole("button", { name: "Analyse starten", exact: true }),
   ).toBeDisabled();
   const system = await (await page.request.get("/api/system/status")).json();
   if (
@@ -195,7 +195,7 @@ test("AI-workspace toont configuratie en vraagt expliciete bevestiging", async (
     await expect(
       page
         .getByRole("region", { name: "AI Analysis Workspace" })
-        .getByRole("checkbox"),
+        .getByRole("checkbox", { name: /extern AI-request/ }),
     ).not.toBeChecked();
   }
 });

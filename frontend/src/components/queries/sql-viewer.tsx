@@ -223,6 +223,7 @@ export function SqlComparison({
   proposed,
   empty,
   proposedLabel,
+  proposedTitle = "Optimized SQL Query",
   timing,
   status,
 }: {
@@ -230,6 +231,7 @@ export function SqlComparison({
   proposed: string | null;
   empty?: string;
   proposedLabel?: string;
+  proposedTitle?: string;
   timing?: { original: string; proposed: string };
   status?: ReactNode;
 }) {
@@ -282,7 +284,7 @@ export function SqlComparison({
               timing={timing?.original}
             />
             <SqlViewer
-              title="Optimized SQL Query"
+              title={proposedTitle}
               sql={proposed}
               formatted={after}
               empty={empty}

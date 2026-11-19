@@ -23,7 +23,7 @@ def main():
     """
     Run the validation framework on all candidates, print the summary and save the results to ``results/``.
 
-    Command-line arguments: ``uri`` (database URI) and ``--reps`` (timing repetitions, default 7).
+    Command-line arguments: ``uri`` (database URI) and ``--reps`` (timing repetitions, default 3, maximum 3 executed).
 
     Returns
     -------

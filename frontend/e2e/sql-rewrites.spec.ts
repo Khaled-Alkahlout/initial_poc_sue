@@ -104,9 +104,12 @@ test("top_products: no rewrite, focused candidate and SQL display", async ({
   });
   await page.goto("/queries/top_products");
   const workspace = page.getByRole("region", { name: "AI Analysis Workspace" });
-  await workspace.getByRole("checkbox").first().check();
   await workspace
-    .getByRole("button", { name: "Analyze with AI", exact: true })
+    .getByRole("combobox", { name: "Context voor het model" })
+    .selectOption("C1_query");
+  await workspace.getByRole("checkbox", { name: /extern AI-request/ }).check();
+  await workspace
+    .getByRole("button", { name: "Analyse starten", exact: true })
     .click();
   await expect(
     workspace.getByRole("heading", {
@@ -134,7 +137,10 @@ test("top_products: no rewrite, focused candidate and SQL display", async ({
     workspace.getByText(/Geen vergelijkbare prestatiemeting beschikbaar/),
   ).toBeVisible();
   await workspace
-    .getByRole("button", { name: "Generate SQL Rewrite", exact: true })
+    .getByRole("button", {
+      name: "Opnieuw analyseren met eerdere uitkomst",
+      exact: true,
+    })
     .click();
   await expect(
     workspace.getByRole("heading", {

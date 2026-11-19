@@ -3,15 +3,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play } from "lucide-react";
 import { api, errorMessage } from "@/lib/api/client";
-import type { Query, SystemStatus } from "@/lib/api/contracts";
+import type { Query, RunInput, SystemStatus } from "@/lib/api/contracts";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/fields";
 import { Button } from "@/components/ui/button";
+import { AnalysisOptions } from "./analysis-options";
 
 export function StartRun({
   queries,
   system,
-  label = "POC starten",
+  label = "Nieuwe analyse",
   queryId,
 }: {
   queries: Query[];
@@ -20,30 +21,38 @@ export function StartRun({
   queryId?: string;
 }) {
   const router = useRouter();
+  const liveMode = system.run_modes.find((item) => item.id === "live");
+  const analysisMode = system.run_modes.find((item) => item.id === "analysis");
+  const databaseMode = system.run_modes.find((item) => item.id === "validate");
+  const canValidate = databaseMode?.available === true;
+  const canAnalyze =
+    liveMode?.available === true || analysisMode?.available === true;
+  const defaultCase = canValidate
+    ? queries.find((query) => query.query_id === "audit_log_page")
+    : undefined;
   const [open, setOpen] = useState(false);
   const [selectedQuery, setSelectedQuery] = useState(
-    queryId ?? queries[0]?.query_id ?? "",
+    queryId ?? defaultCase?.query_id ?? queries[0]?.query_id ?? "",
   );
   const [confirmModel, setConfirmModel] = useState(false);
   const [confirmSql, setConfirmSql] = useState(false);
+  const [condition, setCondition] = useState<RunInput["condition"]>(
+    canValidate ? "C4_stats" : "C1_query",
+  );
+  const [testAfter, setTestAfter] = useState(canValidate);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const liveMode = system.run_modes.find((item) => item.id === "live");
-  const analysisMode = system.run_modes.find((item) => item.id === "analysis");
-  const canValidate = liveMode?.available === true;
-  const canAnalyze = canValidate || analysisMode?.available === true;
-  const statusReason = canAnalyze
-    ? liveMode?.reason
-    : (analysisMode?.reason ??
-      liveMode?.reason ??
-      "AI-analyse is momenteel niet beschikbaar.");
+  const statusReason =
+    analysisMode?.reason ??
+    liveMode?.reason ??
+    "AI-analyse is momenteel niet beschikbaar.";
+  const needsDatabase = condition !== "C1_query" || testAfter;
   const canStart =
     canAnalyze &&
     selectedQuery !== "" &&
     confirmModel &&
-    (!canValidate || confirmSql) &&
+    (!needsDatabase || (canValidate && confirmSql)) &&
     !busy;
-  const startLabel = canValidate ? "Live POC starten" : "AI-analyse starten";
 
   function changeOpen(nextOpen: boolean) {
     setOpen(nextOpen);
@@ -61,10 +70,10 @@ export function StartRun({
     setError(null);
     try {
       const run = await api.startRun({
-        mode: canValidate ? "live" : "analysis",
+        mode: testAfter ? "live" : "analysis",
         query_id: selectedQuery,
-        condition: "C1_query",
-        confirm_sql: canValidate && confirmSql,
+        condition,
+        confirm_sql: needsDatabase && confirmSql,
         confirm_external_model: confirmModel,
       });
       setOpen(false);
@@ -85,12 +94,12 @@ export function StartRun({
         </Button>
       </DialogTrigger>
       <DialogContent
-        title="POC uitvoeren"
-        description="Laat het ingestelde AI-model een SQL-voorstel voor de gekozen query maken."
+        title="SQL-analyse starten"
+        description="Kies de context voor het model en of je het voorstel daarna wilt testen."
       >
         <form className="form-grid" onSubmit={submit}>
           <label className="field">
-            <span>Querycase</span>
+            <span>Query</span>
             <Select
               value={selectedQuery}
               onChange={(e) => setSelectedQuery(e.target.value)}
@@ -100,24 +109,20 @@ export function StartRun({
               ))}
             </Select>
           </label>
-          <div className="field">
-            <span>Uitvoermodus</span>
-            <strong className="text-sm">Live POC</strong>
-          </div>
-          <p className="notice notice-blue">
-            {canAnalyze && !canValidate && (
-              <>
-                Je kunt de AI-analyse starten. Correctheid en Benchmark vereisen
-                een geconfigureerde testdatabase.{" "}
-              </>
-            )}
-            {statusReason}
-          </p>
+          <AnalysisOptions
+            system={system}
+            condition={condition}
+            onConditionChange={setCondition}
+            testAfter={testAfter}
+            onTestAfterChange={setTestAfter}
+            confirmDatabase={confirmSql}
+            onConfirmDatabaseChange={setConfirmSql}
+            disabled={busy || !canAnalyze}
+          />
+          {!canAnalyze && <p className="notice notice-blue">{statusReason}</p>}
           {canAnalyze && (
             <p className="text-xs muted">
-              Provider:{" "}
-              <strong>{system.provider ?? "ingesteld op de server"}</strong> ·
-              Model:{" "}
+              <strong>{system.provider ?? "Ingestelde provider"}</strong> ·{" "}
               <span className="mono">
                 {system.configured_model ?? "ingesteld op de server"}
               </span>
@@ -133,24 +138,10 @@ export function StartRun({
               required
             />
             <span>
-              Ik geef toestemming om de gekozen query naar het AI-model te
-              sturen en ga akkoord met mogelijke AI-kosten.
+              Ik ga akkoord met mogelijke AI-kosten en geef toestemming om de
+              gekozen SQL en context naar het AI-model te sturen.
             </span>
           </label>
-          {canValidate && (
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={confirmSql}
-                onChange={(e) => setConfirmSql(e.target.checked)}
-                required
-              />
-              <span>
-                Ik bevestig de read-only correctheidscontrole en benchmark op de
-                geïsoleerde testdatabase.
-              </span>
-            </label>
-          )}
           {error && (
             <p role="alert" className="form-error">
               {error}
@@ -165,7 +156,7 @@ export function StartRun({
               Annuleren
             </Button>
             <Button type="submit" disabled={!canStart}>
-              {busy ? "In wachtrij zetten…" : startLabel}
+              {busy ? "In wachtrij zetten…" : "Analyse starten"}
             </Button>
           </div>
         </form>

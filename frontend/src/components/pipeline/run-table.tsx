@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ArrowDownUp, ArrowUpRight, Search } from "lucide-react";
 import type { RunSummary } from "@/lib/api/contracts";
-import { count, dateTime } from "@/lib/formatters";
+import { conditionLabels, count, dateTime } from "@/lib/formatters";
 import { LifecycleBadge, SourceBadge } from "@/components/shared/status";
 import { EmptyState } from "@/components/shared/states";
 import { Input, Select } from "@/components/ui/fields";
@@ -47,18 +47,18 @@ export function RunTable({
             />
           </div>
           <Select
-            aria-label="Filter op runtype"
+            aria-label="Filter op uitvoering"
             value={mode}
             onChange={(e) => setMode(e.target.value)}
           >
-            <option value="all">Alle runtypen</option>
-            <option value="analysis">AI-analyse · ongetest</option>
+            <option value="all">Alle uitvoeringen</option>
+            <option value="analysis">SQL-analyse</option>
             <option value="validate">Voorstelvalidatie</option>
             <option value="historical">Historisch</option>
             <option value="replay">Replay</option>
             <option value="mock">Offline mock</option>
             <option value="live_mock">Testdatabase · mock</option>
-            <option value="live">Live POC</option>
+            <option value="live">Analyse met validatie</option>
           </Select>
           <Select
             aria-label="Filter op runstatus"
@@ -79,7 +79,8 @@ export function RunTable({
             <thead>
               <tr>
                 <th>Run / query</th>
-                <th>Type</th>
+                <th>Uitvoering</th>
+                <th>Modelcontext</th>
                 <th>
                   <button
                     className="sort-button"
@@ -108,6 +109,13 @@ export function RunTable({
                   <td>
                     <SourceBadge source={run.mode} />
                   </td>
+                  <td>
+                    {run.conditions?.length
+                      ? run.conditions
+                          .map((name) => conditionLabels[name] ?? name)
+                          .join(" · ")
+                      : "Niet vastgelegd"}
+                  </td>
                   <td>{dateTime(run.created_at)}</td>
                   <td>
                     <LifecycleBadge status={run.lifecycle} />
@@ -130,7 +138,7 @@ export function RunTable({
       ) : (
         <EmptyState
           title="Geen runs gevonden"
-          description="Start een replay of pas de filters aan."
+          description="Start een analyse of pas de filters aan."
         />
       )}
     </>

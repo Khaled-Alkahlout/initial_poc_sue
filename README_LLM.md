@@ -10,7 +10,7 @@ en een foute of nutteloze. Elke LLM-uitvoer gaat door hetzelfde framework als `r
   - `C2_schema`: + kolommen, nullability en indexmetadata van de gebruikte tabellen
   - `C3_plan`: + beperkt geschat `EXPLAIN (FORMAT JSON)`-plan zonder predicates
   - `C4_stats`: + geschatte rijen per tabel, null_frac en n_distinct
-- `llm/client.py`: systeemprompt, prompt opbouwen, Anthropic API aanroepen, SQL uit het antwoord halen
+- `llm/client.py`: gedeelde systeemprompt, usercontext opbouwen, modelaanroep en SQL uit het analyseschema lezen
 - `scripts/run_llm.py`: voert alles uit en beoordeelt elke herschrijving met `evaluate()` uit `run_validation.py`
 
 ## Installeren (eenmalig, in de conda-omgeving `deepdive`)

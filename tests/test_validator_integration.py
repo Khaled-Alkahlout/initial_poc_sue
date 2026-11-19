@@ -136,6 +136,38 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(row["parameter_checks"][-1]["label"], "benchmark")
         self.time.assert_not_called()
 
+    def test_correctness_and_benchmark_are_capped_at_three_and_keep_timing_binding(
+        self,
+    ):
+        self.case.params = lambda ctx: [(str(n), {"n": n}) for n in range(1, 9)]
+        self.case.timing_params = lambda ctx: {"n": 8}
+        self.read.return_value = Result(["n"], [(1,)], 5, [23])
+        self.time.return_value = {"faster": True, "speedup": 2}
+        row = evaluate(Mock(), self.case, self.candidate, {}, reps=8)
+        self.assertEqual(row["param_sets"], 3)
+        self.assertEqual(
+            [check["label"] for check in row["parameter_checks"]], ["1", "2", "8"]
+        )
+        self.assertEqual(self.read.call_count, 6)
+        self.assertEqual(self.time.call_args.args[4], 3)
+        self.assertEqual(self.read.call_args.args[2], {"n": 8})
+        self.assertEqual(row["parameter_checks"][0]["original_ms"], 5)
+        self.assertEqual(row["parameter_checks"][0]["proposed_ms"], 5)
+        self.assertGreaterEqual(row["parameter_checks"][0]["duration_ms"], 0)
+
+    def test_failed_candidate_preserves_original_time_and_rows(self):
+        self.read.side_effect = [
+            Result(["n"], [(1,)], 14, [23]),
+            DatabaseError("private"),
+        ]
+        row = evaluate(Mock(), self.case, self.candidate, {})
+        check = row["parameter_checks"][0]
+        self.assertEqual(check["status"], "EXEC_ERROR")
+        self.assertEqual(check["original_ms"], 14)
+        self.assertEqual(check["original_rows"], 1)
+        self.assertGreaterEqual(check["proposed_ms"], 0)
+        self.assertGreaterEqual(check["duration_ms"], 0)
+
     def test_missing_or_over_limit_evidence_never_passes(self):
         self.case.params = lambda ctx: []
         row = evaluate(Mock(), self.case, self.candidate, {})
@@ -147,6 +179,69 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(row["correctness_status"], "inconclusive")
         self.assertEqual(row["parameter_checks"][0]["status"], "ROW_LIMIT")
         self.time.assert_not_called()
+
+    def test_comparison_timeout_identifies_the_query_and_parameter_set(self):
+        connection = Mock()
+        timeout = DatabaseError("driver diagnostic with private data")
+        timeout.sqlstate = "57014"
+        timeout.diag = SimpleNamespace(
+            message_primary="canceling statement due to statement timeout"
+        )
+        self.read.side_effect = timeout
+
+        row = evaluate(
+            connection, self.case, self.candidate, {}, correctness_timeout_ms=600_000
+        )
+
+        connection.execute.assert_called_once_with(
+            "SET LOCAL statement_timeout = 600000"
+        )
+        self.assertEqual(row["verdict"], "VALIDATION_INCONCLUSIVE")
+        self.assertEqual(row["parameter_checks"][0]["status"], "STATEMENT_TIMEOUT")
+        self.assertIn("oorspronkelijke query", row["detail"])
+        self.assertIn("bij small", row["detail"])
+        self.assertIn("600 s", row["detail"])
+        self.assertNotIn("private data", str(row))
+        self.time.assert_not_called()
+
+    def test_equivalent_queries_under_two_seconds_reach_benchmark(self):
+        self.read.return_value = Result(["n"], [(1,)], 1_500, [23])
+        self.time.return_value = {"faster": False, "speedup": 1}
+
+        row = evaluate(Mock(), self.case, self.candidate, {})
+
+        self.assertEqual(row["correctness_status"], "passed")
+        self.assertEqual(row["benchmark_status"], "warning")
+        self.time.assert_called_once()
+
+    def test_equivalent_queries_at_the_benchmark_limit_skip_benchmark(self):
+        self.read.return_value = Result(["n"], [(1,)], 2_000, [23])
+
+        row = evaluate(
+            Mock(), self.case, self.candidate, {}, correctness_timeout_ms=30_000
+        )
+
+        self.assertEqual(row["correctness_status"], "passed")
+        self.assertEqual(row["benchmark_status"], "skipped")
+        self.assertEqual(row["param_sets"], 2)
+        self.time.assert_not_called()
+
+    def test_long_benchmark_timeout_admits_and_measures_slow_equivalent_queries(self):
+        connection = Mock()
+        self.read.return_value = Result(["n"], [(1,)], 120_000, [23])
+        self.time.side_effect = measure
+        with patch("validator.timing.run_query", return_value=self.read.return_value):
+            row = evaluate(
+                connection, self.case, self.candidate, {}, benchmark_timeout_ms=600_000
+            )
+
+        self.assertEqual(row["correctness_status"], "passed")
+        self.assertEqual(row["orig_median_ms"], 120_000)
+        self.assertEqual(row["reps"], 3)
+        self.assertEqual(len(row["benchmark_measurements"]), 3)
+        connection.execute.assert_called_once_with(
+            "SET LOCAL statement_timeout = 600000"
+        )
 
     def test_benchmark_error_preserves_correctness_without_approval(self):
         self.read.return_value = Result(["n"], [(1,)], 1, [23])
@@ -167,14 +262,53 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(row["verdict"], "EQUIVALENT_NOT_FASTER")
 
     def test_measurement_starts_with_each_query_and_rejects_overlapping_timings(self):
+        connection = Mock()
         with patch("validator.timing.run_query") as fetch:
             fetch.side_effect = [
                 SimpleNamespace(ms=ms) for ms in (20, 7, 3, 5, 20, 7, 3, 5)
             ]
-            row = measure(Mock(), "orig", "cand", {}, 4)
+            row = measure(connection, "orig", "cand", {}, 4)
+        connection.execute.assert_called_once_with("SET LOCAL statement_timeout = 2000")
         self.assertEqual(
             [call.args[1] for call in fetch.call_args_list],
             ["orig", "cand", "cand", "orig"] * 2,
         )
         self.assertGreater(row["speedup"], 1.2)
         self.assertFalse(row["faster"])
+
+    def test_three_stable_benchmark_pairs_can_pass_and_record_individual_times(self):
+        with patch(
+            "validator.timing.run_query",
+            side_effect=[SimpleNamespace(ms=ms) for ms in (20, 7, 7, 20, 20, 7)],
+        ):
+            row = measure(Mock(), "orig", "cand", {}, 3)
+        self.assertTrue(row["faster"])
+        self.assertEqual(
+            [entry["first_query"] for entry in row["benchmark_measurements"]],
+            ["original", "proposed", "original"],
+        )
+        self.assertEqual(
+            [entry["original_ms"] for entry in row["benchmark_measurements"]],
+            [20, 20, 20],
+        )
+        self.assertEqual(
+            [entry["proposed_ms"] for entry in row["benchmark_measurements"]], [7, 7, 7]
+        )
+
+    def test_failed_benchmark_retains_completed_and_interrupted_pairs(self):
+        measurements = []
+        with patch(
+            "validator.timing.run_query",
+            side_effect=[
+                SimpleNamespace(ms=20),
+                SimpleNamespace(ms=7),
+                DatabaseError("private"),
+            ],
+        ):
+            with self.assertRaises(DatabaseError):
+                measure(Mock(), "orig", "cand", {}, 3, measurements=measurements)
+        self.assertEqual(
+            [entry["status"] for entry in measurements], ["passed", "error"]
+        )
+        self.assertIsNone(measurements[1]["original_ms"])
+        self.assertGreaterEqual(measurements[1]["proposed_ms"], 0)

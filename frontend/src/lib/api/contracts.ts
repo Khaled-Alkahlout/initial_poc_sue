@@ -51,6 +51,18 @@ const benchmarkSchema = z.object({
   speedup: z.number().nullable(),
   reduction_percent: z.number().nullable(),
   repetitions: z.number().nullable(),
+  measurements: z
+    .array(
+      z.object({
+        repetition: z.number(),
+        first_query: z.enum(["original", "proposed"]),
+        original_ms: z.number().nullable(),
+        proposed_ms: z.number().nullable(),
+        duration_ms: z.number().nullable(),
+        status: z.enum(["passed", "error"]),
+      }),
+    )
+    .optional(),
   status: stageStatus,
   origin: z.string(),
 });
@@ -68,6 +80,8 @@ const contextSchema = z.object({
   note: z.string(),
 });
 export const attemptSchema = z.object({
+  system_prompt: z.string().nullable().optional(),
+  user_prompt: z.string().nullable().optional(),
   diagnostics: z
     .object({
       http_status: z.number().nullable().optional(),
@@ -135,6 +149,7 @@ export const attemptSchema = z.object({
   correctness: stageStatus,
   original_sql: z.string().nullable(),
   proposed_sql: z.string().nullable(),
+  proposal_source: z.enum(["model", "case"]).nullable().optional(),
   explanation: z.string().nullable(),
   detail: z.string(),
   parameter_sets: z.number().nullable(),
@@ -147,6 +162,9 @@ export const attemptSchema = z.object({
         detail: z.string(),
         original_rows: z.number().nullable(),
         proposed_rows: z.number().nullable(),
+        original_ms: z.number().nullable().optional(),
+        proposed_ms: z.number().nullable().optional(),
+        duration_ms: z.number().nullable().optional(),
       }),
     )
     .optional(),
@@ -168,6 +186,7 @@ export const runSummarySchema = z.object({
   created_at: z.string(),
   completed_at: z.string().nullable(),
   query_ids: z.array(z.string()),
+  conditions: z.array(condition).optional(),
   attempt_count: z.number(),
   accepted_count: z.number(),
   issue_count: z.number(),
@@ -290,6 +309,7 @@ export const databaseTestSchema = z.object({
 export type DatabaseTest = z.infer<typeof databaseTestSchema>;
 
 export const systemSchema = z.object({
+  analysis_system_prompt: z.string().nullable().optional(),
   provider: z.string().nullable().optional(),
   configured_model: z.string().nullable().optional(),
   model_status: z.string().optional(),

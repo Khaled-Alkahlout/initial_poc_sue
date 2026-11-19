@@ -16,6 +16,13 @@ const correctnessLabels: Partial<Record<Attempt["correctness"], string>> = {
   error: "Error",
 };
 
+function attemptDuration(ms: number | null | undefined) {
+  if (ms == null) return "Niet vastgelegd";
+  if (ms >= 60_000) return count(ms / 60_000) + " min";
+  if (ms >= 1_000) return count(ms / 1_000) + " s";
+  return benchmarkTime(ms);
+}
+
 export function PerformanceComparison({ attempt }: { attempt: Attempt }) {
   const measured = compareBenchmark(attempt);
   if (!measured) {
@@ -122,6 +129,7 @@ export function OptimizationResults({
   attempt: Attempt;
   action?: React.ReactNode;
 }) {
+  const measurements = attempt.benchmark.measurements ?? [];
   return (
     <Card aria-label="Optimization Results">
       <CardHeader
@@ -182,6 +190,9 @@ export function OptimizationResults({
                     <th scope="col">Set</th>
                     <th scope="col">Rijen origineel</th>
                     <th scope="col">Rijen voorstel</th>
+                    <th scope="col">Duur origineel</th>
+                    <th scope="col">Duur voorstel</th>
+                    <th scope="col">Totale duur</th>
                     <th scope="col">Vergelijking</th>
                   </tr>
                 </thead>
@@ -191,7 +202,51 @@ export function OptimizationResults({
                       <th scope="row">{check.label}</th>
                       <td>{count(check.original_rows)}</td>
                       <td>{count(check.proposed_rows)}</td>
+                      <td>{attemptDuration(check.original_ms)}</td>
+                      <td>{attemptDuration(check.proposed_ms)}</td>
+                      <td>{attemptDuration(check.duration_ms)}</td>
                       <td>{check.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      )}
+      {!!measurements.length && (
+        <div className="panel-body">
+          <details className="inspector">
+            <summary>Benchmarkpogingen</summary>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Poging</th>
+                    <th scope="col">Startvolgorde</th>
+                    <th scope="col">Duur origineel</th>
+                    <th scope="col">Duur voorstel</th>
+                    <th scope="col">Totale duur</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {measurements.map((measurement) => (
+                    <tr key={measurement.repetition}>
+                      <th scope="row">{measurement.repetition}</th>
+                      <td>
+                        {measurement.first_query === "original"
+                          ? "Origineel → voorstel"
+                          : "Voorstel → origineel"}
+                      </td>
+                      <td>{attemptDuration(measurement.original_ms)}</td>
+                      <td>{attemptDuration(measurement.proposed_ms)}</td>
+                      <td>{attemptDuration(measurement.duration_ms)}</td>
+                      <td>
+                        {measurement.status === "passed"
+                          ? "Gemeten"
+                          : "Afgebroken"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

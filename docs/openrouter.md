@@ -72,11 +72,12 @@ Er is geen extra OpenAI SDK nodig; `httpx` verzorgt de compatibele HTTP-aanroep.
 
 ## Lokaal starten en demonstreren zonder database
 
-Gebruik **POC starten** of **Analyze with AI** bij de query. Bevestig de mogelijke
-AI-kosten om de analyse te starten. Met een ingestelde testdatabase vraagt
-**POC starten** ook toestemming voor Correctheid en Benchmark. Zonder
-testdatabase voert het scherm alleen de AI-analyse uit. Historische resultaten
-staan onder **Analysehistorie**.
+Gebruik **Nieuwe analyse** of **Analyse starten** bij de query. Kies bij
+**Context voor het model** welke gegevens meegaan. Met een ingestelde
+testdatabase kun je schema, indexen, een geschat plan en statistieken toevoegen.
+Bij **Na de analyse** kies je tussen het opslaan van het voorstel en het testen
+van correctheid en performance. Bevestig de modelaanroep en de gekozen
+databasehandelingen. De resultaten staan onder **Analysehistorie**.
 
 Een OpenRouter-key hoort onder `OPENROUTER_API_KEY`, ook voor een Anthropic-model.
 Een key onder de verkeerde providernaam geeft een gerichte configuratiefout;
@@ -100,11 +101,11 @@ npm run dev
    levert 500.000 ms mockimpact; dat is geen gemeten databasebelasting.
 3. Controleer OpenRouter via **Systeemstatus**. De keytest gebruikt alleen
    `GET /key` en de openbare modelcatalogus, geen generatie.
-4. Bevestig in de workspace het externe request en klik **Analyze with AI**.
+4. Kies de modelcontext en teststap, bevestig het externe request en klik **Analyse starten**.
 5. De worker doet één request en bewaart gevalideerde gestructureerde output.
    Fouten, ontbrekend model en ongeldige output worden zichtbaar gerapporteerd.
 6. Inspecteer hypothese, rewrite, indexadvies, ontbrekende context en risico's.
-   Validatie en benchmark staan terecht op niet uitgevoerd/niet beschikbaar.
+   De gekozen teststap bepaalt of correctheid en benchmark daarna worden uitgevoerd.
 7. Open de analyse opnieuw via **Analysehistorie** of de querydetailpagina.
 
 Een echte AI-demonstratie heeft een geldige OpenRouter-key en tegoed nodig.
@@ -117,6 +118,13 @@ Het model levert het bestaande analyseschema v2, inclusief
 `rewrite_status`, `rewrite_explanation` en één kandidaat in `optimized_sql`.
 Een gemotiveerde uitkomst zonder voorstel krijgt een eigen status. Ongeldige
 of afgeknotte uitvoer geeft een fout met beschikbare diagnostiek.
+
+Alle nieuwe SQL-analyses, inclusief CLI-experimenten en een nieuwe poging met
+een eerdere uitkomst, gebruiken dezelfde systeemprompt uit `llm/client.py`.
+De userprompt bevat uitsluitend de geselecteerde context als JSON. Een eerdere
+diagnose, kandidaat en uitkomst worden als context meegestuurd. De systeemprompt
+is in het startscherm te bekijken. Nieuwe dashboardanalyses bewaren beide
+verstuurde prompts bij **Technical Details → Prompts en modelcontext**.
 
 De server selecteert één geregistreerde casus. Voor een extra query voeg je op de
 server een SQL-bestand, sorteercontract en parameterprofiel toe aan `cases/`.
@@ -136,9 +144,12 @@ Connect-timeout is 10 seconden, request-timeout 60 seconden. Alleen GET-verzoeke
 herhalen hooguit één keer bij tijdelijke netwerkproblemen, 429, 502 of 503.
 Generatie wordt nooit automatisch herhaald: een timeout kan al kosten hebben
 veroorzaakt. Ook een schema-afwijzing kan een betaald request zijn geweest.
-De lokale worker blijft maximaal 300 seconden actief; één taak is actief en één
-kan wachten. De opslag voorkomt gelijktijdige dubbele analyse/validatie van
-dezelfde query, ook bij dubbele HTTP-aanvragen.
+De lokale worker blijft voor analyses zonder validatie maximaal 300 seconden
+actief. Runs met SQL-validatie krijgen maximaal 2 uur en 5 minuten voor de
+volledige run. Dit biedt ruimte aan maximaal drie vergelijkingsparen en drie
+benchmarkparen met maximaal tien minuten per query, plus vijf minuten voorbereiding.
+Eén taak is actief en één kan wachten. De opslag voorkomt gelijktijdige
+dubbele analyse/validatie van dezelfde query, ook bij dubbele HTTP-aanvragen.
 
 ## Een geïsoleerde testdatabase aansluiten
 
@@ -175,8 +186,8 @@ leesrechten op de casustabellen afzonderlijk te controleren. De test gebruikt
 `SELECT 1`, schemametadata en `LIMIT 0` en is ook beschikbaar als de
 runvalidatie uitstaat. Schakel beide SQL-vlaggen in voor een geïsoleerd testdoel.
 
-Bevestig de modelaanroep en testuitvoering in **Live POC** of via **Analyseer en
-valideer** bij de query. De worker doet eerst `SELECT 1` en controleert toegang
+Bevestig de modelaanroep en de gekozen databasehandelingen bij **Analyse starten**.
+De worker doet eerst `SELECT 1` en controleert toegang
 tot de casustabellen in `public`, inclusief `orders` voor het parameterprofiel.
 Een verbindings- of schemafout stopt de run voordat het model wordt aangeroepen.
 De serverlog vermeldt het run-ID, de fase en foutcategorie, met SQLSTATE wanneer
@@ -191,13 +202,31 @@ Dashboardruns leiden tijdvensters af uit maximaal 512 recente orders. Zo hoeft
 de voorbereiding geen volledige orderhistorie te groeperen. De metingen gelden
 voor de daaruit afgeleide parameters op deze database.
 
+Het startvenster kiest standaard `audit_log_page` als de testdatabase en die
+casus beschikbaar zijn. De modelcontext kan onafhankelijk van de teststap
+worden gekozen. Als een analyse met aansluitende validatie geen SQL-voorstel oplevert,
+gebruikt de pipeline een bestaande variant uit het casusregister. De herkomst staat
+bij de SQL-vergelijking. De variant doorloopt dezelfde SQL-controle en metingen.
+Een model- of veiligheidsfout wordt als zodanig weergegeven.
+
 De verbinding heeft een connect-timeout van 5 s. Vergelijking gebruikt één
-`REPEATABLE READ READ ONLY`-snapshot met een statement-timeout van 2 s en een
-slotwachttijd van 500 ms. Een servercursor haalt maximaal 2.001 rijen op. Bij
-meer dan 2.000 rijen stopt de vergelijking zonder oordeel. Voor de benchmark
+`REPEATABLE READ READ ONLY`-snapshot met een slotwachttijd van 500 ms. De
+parametervoorbereiding gebruikt een statement-time-out van 2 s. De vergelijking
+van voorstellen in het dashboard gebruikt 10 minuten per statement. Bij een time-out
+stopt de controle zonder definitief oordeel en toont ze de getroffen query en
+parameterset. Een servercursor haalt maximaal 2.001 rijen op. Bij meer dan 2.000
+rijen stopt de vergelijking zonder oordeel. Voor de benchmark
 moeten alle sets slagen, inclusief de timingparameters. Die set moet rijen
-opleveren en beide queries moeten binnen 500 ms blijven. De benchmark gebruikt
-zes paren met afwisselende startvolgorde en 500 ms statement-timeout.
+opleveren en beide queries moeten binnen het benchmarkbudget blijven. Dat is
+doorgaans 2 s per statement. Voor `top_products` geldt in het dashboard 10 minuten voor
+de toelatingsproef en per statement tijdens de benchmark. De benchmark gebruikt
+drie paren met afwisselende startvolgorde. De correctheidscheck gebruikt maximaal
+drie parametersets uit het profiel, inclusief de benchmarkparameters. Als die
+buiten de eerste drie vallen, vervangen ze de derde set. Een hoger opgegeven
+aantal benchmarkparen wordt begrensd op drie.
+De uitklapbare overzichten **Resultaten per parameterset** en
+**Benchmarkpogingen** tonen per proef de tijden van origineel en voorstel en
+de totale duur. Ook de duur van afgebroken proeven wordt vastgelegd.
 `ACCEPTED` vereist minstens 1,2× winst op zowel de medianen als de grens tussen
 het eerste kwartiel van het origineel en het derde kwartiel van het voorstel.
 Deze meetregel is indicatief voor de gebruikte testdata en meetomgeving.

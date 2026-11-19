@@ -2,7 +2,12 @@
 
 import json
 
-from api.config import LIVE_PROFILE_ORDERS
+from api.config import (
+    DASHBOARD_BENCHMARK_TIMEOUTS_MS,
+    DASHBOARD_CORRECTNESS_TIMEOUT_MS,
+    LIVE_PROFILE_ORDERS,
+    SQL_RUN_MODES,
+)
 from api.schemas import Attempt, Benchmark, ContextSection, RunDetail
 from api.services.artifacts import (
     CASE_MAP,
@@ -30,22 +35,34 @@ from llm.analysis import (
     unchanged_sql,
 )
 from llm.context import build_context
+from llm.client import SYSTEM, build_prompt
 from llm.generation import GenerationSettings
 from query_selection.adapters import mock_telemetry
 from query_selection.policy import SelectionPolicy
 from query_selection.selection import select_queries
 from validator.checker import SqlRejected, inspect_sql
 from validator.evaluation import evaluate
+from validator.timing import BENCHMARK_TIMEOUT_MS
 
 TITLES = {
-    "analysis": "AI-analyse · ongetest advies",
-    "live": "AI + validatie op testdatabase",
+    "analysis": "SQL-analyse",
+    "live": "SQL-analyse met validatie",
     "validate": "Validatie opgeslagen AI-voorstel",
     "mock": "Offline mock",
     "live_mock": "Testdatabase · mockmodel",
 }
-SQL_MODES = {"validate", "live", "live_mock"}
 MOCK_MODES = {"mock", "live_mock"}
+CONTEXT_LABELS = {
+    "query": "Originele SQL",
+    "schema": "Schema en indexen",
+    "plan": "Geschat queryplan",
+    "stats": "Statistieken",
+    "telemetry": "Gesimuleerde workload",
+    "context_provenance": "Herkomst van de context",
+    "known_bottlenecks": "Eerdere diagnose",
+    "previous_candidate": "Eerder voorstel",
+    "previous_outcome": "Eerdere uitkomst",
+}
 
 
 def saved_proposal(store, source_id, query_id):
@@ -89,16 +106,28 @@ def rewrite_source(store, source_id, query_id):
     return run.attempts[0]
 
 
+def uses_test_database_context(config):
+    return config.get("condition", "C1_query") != "C1_query" and config["mode"] in {
+        "analysis",
+        "live",
+        "live_mock",
+    }
+
+
 def model_context(config, case, original, decision, source):
     blocks = {"query": case.original}
-    live_context = (
-        config["mode"] in {"live", "live_mock"} and config["condition"] != "C1_query"
-    )
+    live_context = uses_test_database_context(config)
     if config["mode"] == "live" or live_context:
         with connect_test_database() as connection:
             check_case_database(connection, original.tables)
             if live_context:
-                blocks = build_context(connection, case, None, config["condition"])
+                blocks = build_context(
+                    connection,
+                    case,
+                    None,
+                    config["condition"],
+                    recent_order_limit=LIVE_PROFILE_ORDERS,
+                )
     blocks = {
         key: redact(value, literals=key != "query") for key, value in blocks.items()
     }
@@ -132,15 +161,15 @@ def model_context(config, case, original, decision, source):
     return blocks, config["condition"] if live_context else "C1_query"
 
 
-def generate(attempt, blocks, generation, settings, focused):
+def generate(attempt, blocks, generation, settings):
     """Populate the existing result contract and keep provider failures inspectable."""
     try:
         attempt.provider, attempt.model, _ = model_configuration(generation)
         if attempt.provider != "openrouter":
             raise AnalysisError("Gestructureerde dashboardanalyse vereist OpenRouter.")
-        analysis, metadata = analyze(
-            blocks, generation=generation, **({"focused": True} if focused else {})
-        )
+        attempt.system_prompt = SYSTEM
+        attempt.user_prompt = build_prompt(blocks)
+        analysis, metadata = analyze(blocks, generation=generation)
         if (
             analysis.optimized_sql
             and redact(analysis.optimized_sql) != analysis.optimized_sql
@@ -160,6 +189,8 @@ def generate(attempt, blocks, generation, settings, focused):
         attempt.analysis = Analysis.model_validate(values)
         attempt.explanation = attempt.analysis.problem
         attempt.proposed_sql = attempt.analysis.optimized_sql
+        if attempt.proposed_sql:
+            attempt.proposal_source = "model"
         attempt.input_tokens = metadata.get("input_tokens")
         attempt.output_tokens = metadata.get("output_tokens")
         attempt.llm_seconds = metadata.get("seconds")
@@ -216,7 +247,7 @@ def validate(attempt, case, mark):
     )
 
     def benchmark_started():
-        mark("correctness", "passed", "Alle ingestelde parametersets komen overeen.")
+        mark("correctness", "passed", "Alle geselecteerde parametersets komen overeen.")
         mark(
             "benchmark",
             "running",
@@ -231,6 +262,10 @@ def validate(attempt, case, mark):
                 Candidate(attempt.candidate, attempt.proposed_sql, "unknown", "llm"),
                 progress=benchmark_started,
                 recent_order_limit=LIVE_PROFILE_ORDERS,
+                correctness_timeout_ms=DASHBOARD_CORRECTNESS_TIMEOUT_MS,
+                benchmark_timeout_ms=DASHBOARD_BENCHMARK_TIMEOUTS_MS.get(
+                    case.name, BENCHMARK_TIMEOUT_MS
+                ),
             )
     except TestDatabaseError as exc:
         attempt.outcome, attempt.correctness = "error", "error"
@@ -274,7 +309,7 @@ def validate(attempt, case, mark):
 def execute_analysis(job, settings, store):
     config, run_id = job["config"], job["id"]
     mode = config["mode"]
-    if mode in SQL_MODES:
+    if mode in SQL_RUN_MODES or uses_test_database_context(config):
         try:
             require_confirmation(settings, config.get("confirm_sql", False))
         except TestDatabaseError as exc:
@@ -337,7 +372,7 @@ def execute_analysis(job, settings, store):
             if item.status == "pending":
                 note = (
                     attempt.detail
-                    if key in {"correctness", "benchmark"}
+                    if key in {"static", "correctness", "benchmark"}
                     else "Fase niet uitgevoerd."
                 )
                 stages[key] = stage(key, "skipped", note, "current")
@@ -374,8 +409,13 @@ def execute_analysis(job, settings, store):
 
     if mode == "validate":
         source = saved_proposal(store, config.get("source_id"), case.name)
-        attempt.candidate = "stored_ai_proposal"
+        attempt.candidate = (
+            source.candidate
+            if source.proposal_source == "case"
+            else "stored_ai_proposal"
+        )
         attempt.proposed_sql, attempt.analysis = source.proposed_sql, source.analysis
+        attempt.proposal_source = source.proposal_source
         attempt.condition, attempt.model, attempt.provider = (
             source.condition,
             source.model,
@@ -383,19 +423,16 @@ def execute_analysis(job, settings, store):
         )
         mark("generation", "skipped", "Opgeslagen voorstel hergebruikt.")
     else:
-        focused = config.get("rewrite_only", False)
         source = (
             rewrite_source(store, config.get("source_id"), case.name)
-            if focused
+            if config.get("rewrite_only", False)
             else None
         )
-        if focused:
-            run.title = "Gericht SQL-rewritevoorstel · ongetest"
         mark(
             "context",
             "running",
             "Verbinding en toegang tot de casustabellen controleren."
-            if mode == "live"
+            if mode == "live" or uses_test_database_context(config)
             else "Context voor de gekozen casus voorbereiden.",
         )
         try:
@@ -411,7 +448,7 @@ def execute_analysis(job, settings, store):
         attempt.context = [
             ContextSection(
                 id=key,
-                label=key,
+                label=CONTEXT_LABELS.get(key, key),
                 state="truncated"
                 if isinstance(value, str) and value.endswith("(afgekapt)")
                 else "redacted",
@@ -443,16 +480,34 @@ def execute_analysis(job, settings, store):
                 "running",
                 "Gestructureerde analyse en één rewriteverzoek via OpenRouter.",
             )
-            generate(attempt, blocks, generation, settings, focused)
+            generate(attempt, blocks, generation, settings)
             if attempt.outcome == "error":
                 mark("generation", "error", attempt.detail)
                 return finish()
             mark(
                 "generation",
                 "passed",
-                "Gestructureerd antwoord, met uitleg over de rewritebeslissing.",
+                "Gestructureerd antwoord, met uitleg over de rewritebeslissing."
+                if attempt.proposed_sql
+                else "AI-analyse ontvangen. Het model gaf geen SQL-voorstel.",
                 attempt.llm_seconds * 1000 if attempt.llm_seconds is not None else None,
             )
+
+    if mode == "live" and attempt.analysis is not None and not attempt.proposed_sql:
+        # The completed AI analysis remains unchanged. A registered candidate
+        # goes through the same admission and database evaluation as model SQL.
+        reference = next(
+            (
+                candidate
+                for candidate in case.candidates
+                if candidate.expected == "equivalent"
+            ),
+            None,
+        )
+        if reference is not None:
+            attempt.candidate = reference.name
+            attempt.proposed_sql = reference.sql.strip()
+            attempt.proposal_source = "case"
 
     if not attempt.proposed_sql:
         attempt.validation_state = "no_rewrite_proposed"
@@ -466,17 +521,22 @@ def execute_analysis(job, settings, store):
             False,
             "UNCHANGED_SQL: De oorspronkelijke SQL is inhoudelijk ongewijzigd.",
         )
-    if attempt.diagnostics:
+    if attempt.diagnostics and attempt.proposal_source != "case":
         attempt.diagnostics["static_validation_accepted"] = ok
         attempt.diagnostics["candidate_rejection_reason"] = (
             None if ok else reason.split(":", 1)[0]
         )
-    mark("static", "passed" if ok else "failed", reason)
+    static_note = (
+        f"Variant {attempt.candidate} uit het casusregister. {reason}"
+        if attempt.proposal_source == "case"
+        else reason
+    )
+    mark("static", "passed" if ok else "failed", static_note)
     if not ok:
         attempt.outcome, attempt.detail = "safety_rejected", reason
         attempt.raw_verdict = "REJECTED_STATIC"
         attempt.validation_state = "rewrite_static_rejected"
-    elif mode in SQL_MODES:
+    elif mode in SQL_RUN_MODES:
         validate(attempt, case, mark)
     elif mode == "mock":
         attempt.detail = "Offline demo. Alleen softwarechecks uitgevoerd."

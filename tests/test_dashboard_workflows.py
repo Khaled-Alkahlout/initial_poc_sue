@@ -12,12 +12,16 @@ from time import monotonic, sleep
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from api.config import LIVE_PROFILE_ORDERS, Settings
+from api.config import (
+    LIVE_PROFILE_ORDERS,
+    Settings,
+)
 from api.services.artifacts import CASE_MAP
 from api.services.database import TestDatabaseError, connect_test_database
 from api.services.storage import Store
 from api.services.workflows import execute_run
 from llm.analysis import AnalysisError
+from llm.client import SYSTEM
 
 MODEL = "fixture/model"
 SETTINGS = {
@@ -36,9 +40,11 @@ CASE = CASE_MAP["top_products"]
 def completion(candidate):
     analysis = {
         "schema_version": 2,
-        "rewrite_status": "candidate",
+        "rewrite_status": "candidate" if candidate else "no_safe_rewrite",
         "optimized_sql": candidate,
-        "rewrite_explanation": "Orders filteren in een CTE.",
+        "rewrite_explanation": "Orders filteren in een CTE."
+        if candidate
+        else "Geen modelvariant gevonden.",
         "problem": "Aggregatie op joins.",
         "root_cause": "Mogelijk veel tussenrijen.",
         "expected_benefit": "Minder tussenrijen.",
@@ -98,11 +104,22 @@ class WorkflowCompositionTests(unittest.TestCase):
         candidate = CASE.candidates[0].sql
         connection = object()
 
-        def rejected(conn, case, proposal, *, progress, recent_order_limit):
+        def rejected(
+            conn,
+            case,
+            proposal,
+            *,
+            progress,
+            recent_order_limit,
+            correctness_timeout_ms,
+            benchmark_timeout_ms,
+        ):
             self.assertIs(conn, connection)
             self.assertIs(case, CASE)
             self.assertEqual(proposal.sql.strip(), candidate.strip())
             self.assertEqual(recent_order_limit, LIVE_PROFILE_ORDERS)
+            self.assertEqual(correctness_timeout_ms, 600_000)
+            self.assertEqual(benchmark_timeout_ms, 600_000)
             return {
                 "case": case.name,
                 "candidate": proposal.name,
@@ -145,8 +162,15 @@ class WorkflowCompositionTests(unittest.TestCase):
         self.assertEqual(payload["model"], MODEL)
         self.assertEqual(payload["reasoning"], {"effort": "xhigh", "exclude": True})
         self.assertEqual(payload["provider"], {"require_parameters": True})
+        self.assertEqual(payload["messages"][0]["content"], SYSTEM)
+        self.assertEqual(result["attempts"][0]["system_prompt"], SYSTEM)
+        self.assertEqual(
+            result["attempts"][0]["user_prompt"], payload["messages"][1]["content"]
+        )
         self.assertNotIn("private-value", str(payload))
-        context.assert_called_once_with(connection, CASE, None, "C4_stats")
+        context.assert_called_once_with(
+            connection, CASE, None, "C4_stats", recent_order_limit=LIVE_PROFILE_ORDERS
+        )
         preflight.assert_called_once()
         evaluate.assert_called_once()
         self.assertEqual(result["model_requests"], 1)
@@ -155,6 +179,112 @@ class WorkflowCompositionTests(unittest.TestCase):
             result["attempts"][0]["parameter_checks"][0]["status"], "ROWCOUNT_MISMATCH"
         )
         self.assertEqual(result["attempts"][0]["benchmark"]["status"], "skipped")
+
+    def test_model_context_can_be_selected_without_running_validation(self):
+        candidate = CASE.candidates[0].sql
+        connection = object()
+        for condition, keys in (
+            ("C2_schema", ("query", "schema")),
+            ("C3_plan", ("query", "schema", "plan")),
+            ("C4_stats", ("query", "schema", "plan", "stats")),
+        ):
+            with (
+                self.subTest(condition=condition),
+                patch(
+                    "llm.analysis._request", return_value=completion(candidate)
+                ) as transport,
+                patch(
+                    "api.services.analysis.connect_test_database",
+                    return_value=nullcontext(connection),
+                ),
+                patch("api.services.analysis.check_case_database"),
+                patch(
+                    "api.services.analysis.build_context",
+                    return_value={
+                        key: CASE.original if key == "query" else key for key in keys
+                    },
+                ) as build,
+                patch("api.services.analysis.evaluate") as evaluate,
+            ):
+                job = self.job(mode="analysis", condition=condition)
+                result = execute_run(job, self.settings, self.store)
+                self.store.update(job["id"], "COMPLETED", result=result)
+            build.assert_called_once_with(
+                connection,
+                CASE,
+                None,
+                condition,
+                recent_order_limit=LIVE_PROFILE_ORDERS,
+            )
+            messages = transport.call_args.kwargs["json"]["messages"]
+            self.assertEqual(messages[0]["content"], SYSTEM)
+            user = json.loads(messages[1]["content"])
+            self.assertEqual(
+                set(user) & {"query", "schema", "plan", "stats"}, set(keys)
+            )
+            self.assertEqual(result["attempts"][0]["condition"], condition)
+            self.assertEqual(result["attempts"][0]["correctness"], "skipped")
+            evaluate.assert_not_called()
+
+    def test_database_context_requires_the_existing_database_confirmation(self):
+        with patch("api.services.analysis.connect_test_database") as connection:
+            with self.assertRaises(AnalysisError):
+                execute_run(
+                    self.job(mode="analysis", confirm_sql=False),
+                    self.settings,
+                    self.store,
+                )
+        connection.assert_not_called()
+
+    def test_live_run_validates_registered_sql_after_a_valid_response_without_rewrite(
+        self,
+    ):
+        case = CASE_MAP["audit_log_page"]
+        reference = case.candidates[0]
+        connection = object()
+        with (
+            patch("llm.analysis._request", return_value=completion(None)) as transport,
+            patch(
+                "api.services.analysis.connect_test_database",
+                side_effect=lambda **kwargs: nullcontext(connection),
+            ),
+            patch("api.services.analysis.check_case_database"),
+            patch(
+                "api.services.analysis.evaluate",
+                return_value={
+                    "case": case.name,
+                    "candidate": reference.name,
+                    "verdict": "EQUIVALENT_NOT_FASTER",
+                    "correctness_status": "passed",
+                    "benchmark_status": "warning",
+                    "param_sets": 3,
+                    "failing_param_sets": 0,
+                    "orig_median_ms": 20,
+                    "cand_median_ms": 20,
+                    "reps": 3,
+                    "detail": "Gelijke resultaten; snelheidswinst niet aangetoond.",
+                },
+            ) as evaluate,
+        ):
+            result = execute_run(
+                self.job(query_id=case.name, condition="C1_query"),
+                self.settings,
+                self.store,
+            )
+        transport.assert_called_once()
+        evaluate.assert_called_once()
+        self.assertEqual(evaluate.call_args.args[2].sql, reference.sql.strip())
+        attempt = result["attempts"][0]
+        self.assertEqual(attempt["proposal_source"], "case")
+        self.assertEqual(attempt["analysis"]["rewrite_status"], "no_safe_rewrite")
+        self.assertIsNone(attempt["analysis"]["optimized_sql"])
+        self.assertEqual(result["model_requests"], 1)
+        stages = {stage["id"]: stage["status"] for stage in result["stages"]}
+        self.assertEqual(stages["static"], "passed")
+        self.assertEqual(stages["correctness"], "passed")
+        self.assertEqual(stages["benchmark"], "warning")
+        self.assertEqual(stages["result"], "warning")
+        self.assertEqual(attempt["benchmark"]["repetitions"], 3)
 
     def test_rejected_or_failed_generation_does_not_start_query_comparison(self):
         for response, expected in (
@@ -291,13 +421,60 @@ class PostgresWorkflowTests(unittest.TestCase):
                     self.assertNotIn("plan", payload)
                 attempt = result["attempts"][0]
                 self.assertEqual(attempt["correctness"], correctness)
-                self.assertEqual(attempt["parameter_sets"], 8)
+                self.assertEqual(attempt["parameter_sets"], 3)
                 if correctness == "failed":
                     self.assertEqual(attempt["outcome"], "mismatch")
                     self.assertEqual(attempt["benchmark"]["status"], "skipped")
                 else:
                     self.assertGreater(attempt["benchmark"]["original_ms"], 0)
-                    self.assertEqual(attempt["benchmark"]["repetitions"], 6)
+                    self.assertEqual(attempt["benchmark"]["repetitions"], 3)
+                    self.assertEqual(len(attempt["benchmark"]["measurements"]), 3)
+                    self.assertGreaterEqual(
+                        attempt["parameter_checks"][0]["original_ms"], 0
+                    )
+
+    def test_selected_database_context_without_validation_uses_the_same_system_prompt(
+        self,
+    ):
+        keys = []
+        for condition, key in (
+            ("C1_query", "query"),
+            ("C2_schema", "schema"),
+            ("C3_plan", "plan"),
+            ("C4_stats", "stats"),
+        ):
+            keys.append(key)
+            with self.subTest(condition=condition):
+                job = self.store.create_job(
+                    "run",
+                    {
+                        "mode": "analysis",
+                        "query_id": CASE.name,
+                        "condition": condition,
+                        "confirm_sql": condition != "C1_query",
+                        "confirm_external_model": True,
+                        "generation_settings": SETTINGS,
+                    },
+                )
+                with (
+                    patch("llm.analysis._model_info", return_value=MODEL_INFO),
+                    patch(
+                        "llm.analysis._request",
+                        return_value=completion(CASE.candidates[0].sql),
+                    ) as transport,
+                    patch("api.services.analysis.evaluate") as evaluate,
+                ):
+                    result = execute_run(job, self.settings, self.store)
+                self.store.update(job["id"], result["lifecycle"], result=result)
+                messages = transport.call_args.kwargs["json"]["messages"]
+                context = json.loads(messages[1]["content"])
+                self.assertEqual(messages[0]["content"], SYSTEM)
+                self.assertEqual(
+                    set(context) & {"query", "schema", "plan", "stats"}, set(keys)
+                )
+                self.assertEqual(result["attempts"][0]["condition"], condition)
+                self.assertEqual(result["attempts"][0]["correctness"], "skipped")
+                evaluate.assert_not_called()
 
     def test_unreachable_live_database_stops_before_model_request(self):
         with socket.socket() as endpoint:
@@ -385,7 +562,7 @@ class PostgresWorkflowTests(unittest.TestCase):
                     self.assertEqual(attempt["correctness"], correctness)
                     benchmark = attempt["benchmark"]
                     if correctness == "passed":
-                        self.assertEqual(benchmark["repetitions"], 6)
+                        self.assertEqual(benchmark["repetitions"], 3)
                         self.assertGreater(benchmark["original_ms"], 0)
                         self.assertGreater(benchmark["proposed_ms"], 0)
                     else:

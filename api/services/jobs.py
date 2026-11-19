@@ -8,7 +8,11 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from api.config import Settings
+from api.config import (
+    SQL_RUN_JOB_TIMEOUT_SECONDS,
+    SQL_RUN_MODES,
+    Settings,
+)
 from api.services.errors import log_database_failure
 from api.services.privacy import redact
 from api.services.storage import Store
@@ -38,13 +42,17 @@ class JobManager:
             job = self.store.create_job(
                 kind, {**config, "runtime_revision": LOADED_REVISION}
             )
-            self.pool.submit(self._execute, job["id"])
+            self.pool.submit(self._execute, job)
             return job
         except Exception:
             self.slots.release()
             raise
 
-    def _execute(self, job_id: str):
+    def _execute(self, job: dict):
+        job_id, config = job["id"], job["config"]
+        timeout_seconds = self.settings.timeout_seconds
+        if job["kind"] == "run" and config.get("mode") in SQL_RUN_MODES:
+            timeout_seconds = max(timeout_seconds, SQL_RUN_JOB_TIMEOUT_SECONDS)
         process = None
         try:
             self.store.update(job_id, "RUNNING")
@@ -67,7 +75,7 @@ class JobManager:
             )
             with self.lock:
                 self.processes.add(process)
-            _, stderr = process.communicate(timeout=self.settings.timeout_seconds)
+            _, stderr = process.communicate(timeout=timeout_seconds)
             finished = self.store.job(job_id)
             if finished["status"] in {"COMPLETED", "FAILED"}:
                 log_database_failure(finished)

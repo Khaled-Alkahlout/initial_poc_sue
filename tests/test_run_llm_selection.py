@@ -115,6 +115,25 @@ class PipelineRoutingTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertIsNotNone(selection)
 
+    def test_no_rewrite_is_saved_and_never_passed_to_validation(self):
+        response = {
+            "sql": None,
+            "text": "{}",
+            "rewrite_explanation": "Geen veilige transformatie.",
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "seconds": 1,
+            "response_schema_version": 2,
+        }
+        with patch.object(run_llm, "call_llm", return_value=response):
+            _, evaluations, calls, rows, _ = self.run_pipeline(
+                ["--select-mock", "--top-k", "1"]
+            )
+        self.assertEqual(calls, 1)
+        self.assertEqual(evaluations, [])
+        self.assertEqual(rows[0]["verdict"], "NO_REWRITE_PROPOSED")
+        self.assertEqual(rows[0]["benchmark_status"], "skipped")
+
 
 if __name__ == "__main__":
     unittest.main()

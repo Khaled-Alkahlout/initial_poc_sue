@@ -142,41 +142,52 @@ describe("review en navigatie", () => {
     await user.click(screen.getByLabelText("Wissel licht en donker thema"));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
-  test("Live POC start beide stappen na bevestiging voor model en database", async () => {
+  test("analyse toont context en teststap en vraagt bevestiging voor model en database", async () => {
     const user = userEvent.setup();
     const config = system();
     config.run_modes.push(availableAnalysis);
     config.run_modes = config.run_modes.map((mode) =>
-      mode.id === "live"
+      mode.id === "live" || mode.id === "validate"
         ? { ...mode, available: true, reason: "Testdatabase geconfigureerd." }
         : mode,
     );
     const start = vi
       .spyOn(api, "startRun")
       .mockResolvedValue({ ...run(), mode: "live" });
-    render(<StartRun queries={[query()]} system={config} />);
-    await user.click(screen.getByRole("button", { name: "POC starten" }));
-    expect(screen.getByText("Live POC", { exact: true })).toBeVisible();
-    expect(screen.getAllByRole("combobox")).toEqual([
-      screen.getByRole("combobox", { name: "Querycase" }),
-    ]);
+    render(
+      <StartRun
+        queries={[query(), query({ query_id: "audit_log_page" })]}
+        system={config}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Nieuwe analyse" }));
     expect(
-      screen.getByRole("button", { name: "Live POC starten" }),
+      screen.getByRole("combobox", { name: "Context voor het model" }),
+    ).toHaveValue("C4_stats");
+    expect(screen.getByRole("combobox", { name: "Na de analyse" })).toHaveValue(
+      "test",
+    );
+    await user.click(screen.getByText("Vaste systeemprompt bekijken"));
+    expect(screen.getByText(config.analysis_system_prompt!)).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Analyse starten" }),
     ).toBeDisabled();
     await user.click(screen.getByRole("checkbox", { name: /AI-kosten/ }));
     expect(
-      screen.getByRole("button", { name: "Live POC starten" }),
+      screen.getByRole("button", { name: "Analyse starten" }),
     ).toBeDisabled();
     await user.click(
-      screen.getByRole("checkbox", { name: /read-only correctheidscontrole/ }),
+      screen.getByRole("checkbox", {
+        name: /correctheidscontrole en benchmark/,
+      }),
     );
-    await user.click(screen.getByRole("button", { name: "Live POC starten" }));
+    await user.click(screen.getByRole("button", { name: "Analyse starten" }));
     await waitFor(() =>
       expect(start).toHaveBeenCalledWith(
         expect.objectContaining({
           mode: "live",
-          query_id: "top_products",
-          condition: "C1_query",
+          query_id: "audit_log_page",
+          condition: "C4_stats",
           confirm_sql: true,
           confirm_external_model: true,
         }),
@@ -184,23 +195,28 @@ describe("review en navigatie", () => {
     );
     expect(push).toHaveBeenCalledWith("/runs/test-run");
   });
-  test("POC uitvoeren start AI-analyse na kostenbevestiging als de database niet is geconfigureerd", async () => {
+  test("zonder testdatabase gaat alleen SQL mee en wordt het voorstel opgeslagen", async () => {
     const user = userEvent.setup();
     const config = system();
     const reason = "SUE_DATABASE_URL ontbreekt op de server.";
     config.run_modes = config.run_modes.map((mode) =>
-      mode.id === "live" ? { ...mode, reason } : mode,
+      mode.id === "live" || mode.id === "validate" ? { ...mode, reason } : mode,
     );
     config.run_modes.push(availableAnalysis);
     const start = vi
       .spyOn(api, "startRun")
       .mockResolvedValue({ ...run(), mode: "analysis" });
     render(<StartRun queries={[query()]} system={config} />);
-    await user.click(screen.getByRole("button", { name: "POC starten" }));
+    await user.click(screen.getByRole("button", { name: "Nieuwe analyse" }));
     expect(screen.getByText(reason, { exact: false })).toBeVisible();
-    expect(screen.getByText(/Correctheid en Benchmark vereisen/)).toBeVisible();
+    expect(
+      screen.getByRole("combobox", { name: "Context voor het model" }),
+    ).toHaveValue("C1_query");
+    expect(screen.getByRole("combobox", { name: "Na de analyse" })).toHaveValue(
+      "save",
+    );
     expect(screen.getAllByRole("checkbox")).toHaveLength(1);
-    const submit = screen.getByRole("button", { name: "AI-analyse starten" });
+    const submit = screen.getByRole("button", { name: "Analyse starten" });
     expect(submit).toBeDisabled();
     await user.click(submit);
     expect(start).not.toHaveBeenCalled();
@@ -215,17 +231,17 @@ describe("review en navigatie", () => {
     });
     expect(push).toHaveBeenCalledWith("/runs/test-run");
   });
-  test("POC uitvoeren toont de reden en blokkeert starten als AI-analyse niet beschikbaar is", async () => {
+  test("ontbrekende modelconfiguratie blokkeert de analyse met uitleg", async () => {
     const user = userEvent.setup();
     const config = system();
     const reason = "OpenRouter is nog niet geconfigureerd.";
     config.run_modes.push({ ...availableAnalysis, available: false, reason });
     const start = vi.spyOn(api, "startRun");
     render(<StartRun queries={[query()]} system={config} />);
-    await user.click(screen.getByRole("button", { name: "POC starten" }));
+    await user.click(screen.getByRole("button", { name: "Nieuwe analyse" }));
     expect(screen.getByText(reason)).toBeVisible();
     expect(screen.getByRole("checkbox", { name: /AI-kosten/ })).toBeDisabled();
-    const submit = screen.getByRole("button", { name: "AI-analyse starten" });
+    const submit = screen.getByRole("button", { name: "Analyse starten" });
     expect(submit).toBeDisabled();
     await user.click(submit);
     expect(start).not.toHaveBeenCalled();

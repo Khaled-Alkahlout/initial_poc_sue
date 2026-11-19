@@ -15,6 +15,7 @@ MESSAGES = {
     "permissions": "De databaserol mist rechten om de casus uit te voeren. Controleer USAGE op public en SELECT-rechten.",
     "schema": "Een vereist schema, tabel of kolom ontbreekt. Controleer het testdataschema en de SQL.",
     "connection_lost": "De verbinding met PostgreSQL is tijdens uitvoering verbroken.",
+    "statement_timeout": "PostgreSQL heeft het statement afgebroken vanwege de statement-time-out.",
     "statement_cancelled": "PostgreSQL heeft het statement afgebroken. Controleer de statement-time-out en belasting.",
     "lock_timeout": "PostgreSQL kon binnen de lockwachttijd geen toegang tot de tabel krijgen.",
     "query_error": "PostgreSQL kon de query of het parameterprofiel niet uitvoeren.",
@@ -68,6 +69,10 @@ def safe_sqlstate(value):
 def postgres_error(exc, phase):
     state = safe_sqlstate(getattr(exc, "sqlstate", None))
     code = SQLSTATE_CODES.get(state)
+    if code == "statement_cancelled":
+        message = getattr(getattr(exc, "diag", None), "message_primary", None)
+        if message and "statement timeout" in message.lower():
+            code = "statement_timeout"
     if state and state.startswith("28"):
         code = "authentication"
     if code is None and phase == "connect":

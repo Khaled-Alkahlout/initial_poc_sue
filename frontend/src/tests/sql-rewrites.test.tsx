@@ -56,6 +56,25 @@ test("stored SQL is highlighted, displayed verbatim and acknowledged without SQL
   await waitFor(() => expect(report).toHaveBeenCalledWith(value.run_id, true));
 });
 
+test("a registered SQL variant is shown without attributing it to the model", async () => {
+  const report = vi
+    .spyOn(api, "recordRewriteDisplay")
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  const value = attempt({
+    analysis,
+    candidate: "R1_andere_opmaak",
+    proposed_sql: "SELECT 2 AS quantity",
+    proposal_source: "case",
+    correctness: "passed",
+    diagnostics: { rewrite_requested: true, model_returned_candidate: false },
+  });
+  render(<RewriteSummary attempt={value} />);
+  expect(screen.getByRole("region", { name: "Casusvariant" })).toBeVisible();
+  expect(screen.getByText(/Het model gaf geen SQL-voorstel/)).toBeVisible();
+  expect(screen.queryByText("AI-voorstel")).not.toBeInTheDocument();
+  await waitFor(() => expect(report).toHaveBeenCalledWith(value.run_id, false));
+});
+
 test.each([
   ["rewrite_parsing_failed", "error", "Rewrite parsing failed"],
   [

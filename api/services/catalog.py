@@ -57,6 +57,11 @@ class Catalog:
                 raise StoredResultError(job["id"], exc) from exc
             return result.model_copy(
                 update={
+                    "conditions": [
+                        name
+                        for name in CONDITIONS
+                        if any(a.condition == name for a in result.attempts)
+                    ],
                     "lifecycle": job["status"],
                     "completed_at": job["completed_at"],
                     "error": job["error"],
@@ -69,8 +74,8 @@ class Catalog:
                 "replay": "Historische replay",
                 "mock": "Offline mock",
                 "live_mock": "Testdatabase / mockmodel",
-                "live": "Live POC",
-                "analysis": "AI-analyse · ongetest advies",
+                "live": "SQL-analyse met validatie",
+                "analysis": "SQL-analyse",
                 "validate": "Validatie opgeslagen AI-voorstel",
             }[config["mode"]],
             mode=config["mode"],
@@ -78,6 +83,9 @@ class Catalog:
             created_at=job["created_at"],
             completed_at=job["completed_at"],
             query_ids=[config["query_id"]],
+            conditions=[config["condition"]]
+            if config.get("condition") in CONDITIONS
+            else [],
             stages=job["progress"]
             or [
                 stage(
@@ -231,7 +239,7 @@ class Catalog:
         llm_reason = error or (
             "Echte AI-analyse via "
             + str(provider)
-            + ". SQL-validatie is een afzonderlijke stap voor deze modus."
+            + ". Met een bevestigde testdatabase kun je extra modelcontext toevoegen."
             if llm_ready
             else "AI-analyse nog niet beschikbaar. Vereist: "
             + ", ".join(missing)
@@ -249,7 +257,10 @@ class Catalog:
             )
             or "De worker controleert de testdatabase vóór de AI-aanroep."
         )
+        from llm.client import SYSTEM
+
         return SystemStatus(
+            analysis_system_prompt=SYSTEM,
             provider=provider,
             configured_model=model_name,
             model_status="not_checked" if model else "not_configured",
@@ -265,7 +276,7 @@ class Catalog:
             run_modes=[
                 Capability(
                     id="analysis",
-                    label="AI-analyse zonder database",
+                    label="SQL-analyse",
                     available=llm_ready,
                     reason=llm_reason,
                     external_model=True,
@@ -298,7 +309,7 @@ class Catalog:
                 ),
                 Capability(
                     id="live",
-                    label="Live POC",
+                    label="SQL-analyse met validatie",
                     available=llm_ready and sql_ready,
                     reason=live_reason,
                     executes_sql=True,

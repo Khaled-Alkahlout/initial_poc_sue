@@ -41,6 +41,15 @@ class Stage(BaseModel):
     origin: str = "historical"
 
 
+class BenchmarkMeasurement(BaseModel):
+    repetition: int
+    first_query: Literal["original", "proposed"]
+    original_ms: float | None = None
+    proposed_ms: float | None = None
+    duration_ms: float | None = None
+    status: Literal["passed", "error"]
+
+
 class Benchmark(BaseModel):
     original_ms: float | None = None
     proposed_ms: float | None = None
@@ -49,6 +58,7 @@ class Benchmark(BaseModel):
     speedup: float | None = None
     reduction_percent: float | None = None
     repetitions: int | None = None
+    measurements: list[BenchmarkMeasurement] = Field(default_factory=list)
     status: StageStatus = "skipped"
     origin: str = "historical"
 
@@ -67,9 +77,14 @@ class ParameterCheck(BaseModel):
     detail: str
     original_rows: int | None = None
     proposed_rows: int | None = None
+    original_ms: float | None = None
+    proposed_ms: float | None = None
+    duration_ms: float | None = None
 
 
 class Attempt(BaseModel):
+    system_prompt: str | None = None
+    user_prompt: str | None = None
     diagnostics: dict[str, Any] = Field(default_factory=dict)
     partial_response: str | None = None
     id: str
@@ -84,6 +99,7 @@ class Attempt(BaseModel):
     correctness: StageStatus
     original_sql: str | None = None
     proposed_sql: str | None = None
+    proposal_source: Literal["model", "case"] | None = None
     explanation: str | None = None
     detail: str
     parameter_sets: int | None = None
@@ -113,6 +129,7 @@ class RunSummary(BaseModel):
     created_at: str
     completed_at: str | None = None
     query_ids: list[str] = Field(default_factory=list)
+    conditions: list[Condition] = Field(default_factory=list)
     attempt_count: int = 0
     accepted_count: int = 0
     issue_count: int = 0
@@ -235,7 +252,11 @@ class RunRequest(StrictInput):
         "replay"
     )
     query_id: str = Field(min_length=1, max_length=80)
-    condition: Condition = "C2_schema"
+    condition: Condition = Field(
+        default_factory=lambda data: "C1_query"
+        if data.get("mode") == "analysis"
+        else "C2_schema"
+    )
     source_id: str | None = Field(default=None, max_length=100)
     confirm_sql: bool = False
     confirm_external_model: bool = False
@@ -289,6 +310,7 @@ class DatabaseConnectionTest(BaseModel):
 
 
 class SystemStatus(BaseModel):
+    analysis_system_prompt: str | None = None
     provider: str | None = None
     configured_model: str | None = None
     model_status: str = "not_configured"

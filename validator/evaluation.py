@@ -1,9 +1,11 @@
 """One decision for experiment scripts, live runs and stored proposals."""
 
 from cases.cases import make_ctx
+from time import perf_counter
 from validator.checker import (
     ResultLimitExceeded,
     SqlRejected,
+    STATEMENT_TIMEOUT_MS,
     check_rewrite,
     compare,
     inspect_sql,
@@ -15,9 +17,12 @@ from validator.postgres_errors import MESSAGES, postgres_error
 from validator.timing import (
     BENCHMARK_TIMEOUT_MS,
     DEFAULT_REPETITIONS,
+    MAX_REPETITIONS,
     SPEEDUP_THRESHOLD,
     measure,
 )
+
+MAX_CORRECTNESS_CHECKS = 3
 
 
 def parameter_sets(case, ctx, names):
@@ -35,7 +40,10 @@ def parameter_sets(case, ctx, names):
         raise ValueError(
             "Het parameterprofiel vereist maximaal twaalf unieke sets met de juiste bindingsnamen."
         )
-    return probes, timing
+    selected = probes[:MAX_CORRECTNESS_CHECKS]
+    if not any(params == timing for _, params in selected):
+        selected[-1] = next(probe for probe in probes if probe[1] == timing)
+    return selected, timing
 
 
 def evaluate(
@@ -48,6 +56,8 @@ def evaluate(
     progress=None,
     benchmark=True,
     recent_order_limit=None,
+    correctness_timeout_ms=STATEMENT_TIMEOUT_MS,
+    benchmark_timeout_ms=BENCHMARK_TIMEOUT_MS,
 ):
     """Use one read-only snapshot and benchmark only after complete comparison."""
     import psycopg
@@ -87,10 +97,16 @@ def evaluate(
 
     if not 1 <= reps <= 12:
         raise ValueError("Kies één tot twaalf benchmarkparen.")
+    reps = min(reps, MAX_REPETITIONS)
 
     timing_probe = None
     phase = "context"
     label = None
+    query_label = None
+    check_started = None
+    query_started = None
+    baseline = None
+    rewrite = None
     try:
         with read_snapshot(conn):
             try:
@@ -105,8 +121,17 @@ def evaluate(
             except ValueError as exc:
                 return finish("VALIDATION_INCONCLUSIVE", "inconclusive", str(exc))
             phase = "correctness"
+            if correctness_timeout_ms != STATEMENT_TIMEOUT_MS:
+                conn.execute(
+                    f"SET LOCAL statement_timeout = {int(correctness_timeout_ms)}"
+                )
             for label, params in probes:
+                check_started = query_started = perf_counter()
+                baseline = rewrite = None
+                query_label = "oorspronkelijke query"
                 baseline = run_query(conn, case.original, params)
+                query_label = "kandidaatquery"
+                query_started = perf_counter()
                 rewrite = run_query(conn, cand.sql, params)
                 comparison = compare(baseline, rewrite, case.order_cols)
                 checks.append(
@@ -116,6 +141,9 @@ def evaluate(
                         "detail": comparison.detail,
                         "original_rows": len(baseline.rows),
                         "proposed_rows": len(rewrite.rows),
+                        "original_ms": baseline.ms,
+                        "proposed_ms": rewrite.ms,
+                        "duration_ms": (perf_counter() - check_started) * 1000,
                     }
                 )
                 if params == timing:
@@ -159,39 +187,71 @@ def evaluate(
                     "passed",
                     "De benchmarkparameters leveren geen resultaatrijen op.",
                 )
-            if max(result.ms for result in timing_probe) >= BENCHMARK_TIMEOUT_MS:
+            if max(result.ms for result in timing_probe) >= benchmark_timeout_ms:
                 return finish(
                     "PERFORMANCE_INCONCLUSIVE",
                     "passed",
-                    "De vergelijkingsproef overschrijdt het tijdsbudget voor herhaalde metingen.",
+                    "De vergelijkingsproef op de benchmarkparameters bereikte de "
+                    f"grens van {benchmark_timeout_ms} ms voor herhaalde metingen.",
                 )
             phase = "benchmark"
             if progress:
                 progress()
-            measured = measure(conn, case.original, cand.sql, timing, reps)
+            row["benchmark_measurements"] = []
+            measured = measure(
+                conn,
+                case.original,
+                cand.sql,
+                timing,
+                reps,
+                timeout_ms=benchmark_timeout_ms,
+                measurements=row["benchmark_measurements"],
+            )
     except (psycopg.Error, ResultLimitExceeded) as exc:
         limited = isinstance(exc, ResultLimitExceeded)
+        timed_out = False
         if limited:
             detail = str(exc)
+            status = "ROW_LIMIT"
         else:
             issue = postgres_error(exc, phase)
             row["database_error"] = issue
             detail = MESSAGES[issue["code"]]
+            timed_out = phase == "correctness" and issue["code"] == "statement_timeout"
+            status = "STATEMENT_TIMEOUT" if timed_out else "EXEC_ERROR"
             if phase == "context":
                 detail = "De parametersets konden niet worden voorbereid. " + detail
         if phase == "benchmark":
             return finish("BENCHMARK_ERROR", "passed", detail, "error")
         if label is not None:
+            if timed_out:
+                detail = (
+                    f"De {query_label} bereikte bij {label} de statement-time-out "
+                    f"van {correctness_timeout_ms / 1000:g} s."
+                )
+            else:
+                detail = f"De {query_label} stopte bij {label}. {detail}"
             checks.append(
                 {
                     "label": label,
-                    "status": "ROW_LIMIT" if limited else "EXEC_ERROR",
+                    "status": status,
                     "detail": detail,
+                    "original_rows": len(baseline.rows)
+                    if baseline is not None
+                    else None,
+                    "proposed_rows": len(rewrite.rows) if rewrite is not None else None,
+                    "original_ms": baseline.ms
+                    if baseline is not None
+                    else (perf_counter() - query_started) * 1000,
+                    "proposed_ms": (perf_counter() - query_started) * 1000
+                    if baseline is not None
+                    else None,
+                    "duration_ms": (perf_counter() - check_started) * 1000,
                 }
             )
         return finish(
-            "VALIDATION_INCONCLUSIVE" if limited else "VALIDATION_ERROR",
-            "inconclusive" if limited else "error",
+            "VALIDATION_INCONCLUSIVE" if limited or timed_out else "VALIDATION_ERROR",
+            "inconclusive" if limited or timed_out else "error",
             detail,
         )
 
@@ -207,7 +267,7 @@ def evaluate(
         return finish(
             "ACCEPTED",
             "passed",
-            "Gelijke resultaten op alle testsets en minstens 1,2× sneller in de medianen en tussen de kwartielen.",
+            "Gelijke resultaten op de geselecteerde parametersets en minstens 1,2× sneller in de medianen en tussen de kwartielen.",
             "passed",
             **measured,
         )

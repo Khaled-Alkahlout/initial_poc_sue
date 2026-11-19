@@ -19,18 +19,18 @@ export function dateTime(value: string | null | undefined) {
   }).format(new Date(value));
 }
 export const conditionLabels: Record<string, string> = {
-  C1_query: "C1 · Alleen query",
-  C2_schema: "C2 · Query + schema",
-  C3_plan: "C3 · Met execution plan",
-  C4_stats: "C4 · Met statistieken",
+  C1_query: "Alleen SQL",
+  C2_schema: "SQL + schema en indexen",
+  C3_plan: "SQL + schema + geschat plan",
+  C4_stats: "SQL + schema + plan + statistieken",
 };
 export const sourceLabels: Record<string, string> = {
   historical: "Historisch",
   replay: "Replay",
   mock: "Offline mock",
   live_mock: "Testdatabase · mock",
-  live: "Live POC",
-  analysis: "AI-analyse · ongetest",
+  live: "Analyse met validatie",
+  analysis: "SQL-analyse",
   validate: "Voorstelvalidatie",
   synthetic: "Gesimuleerd",
   current: "Nieuwe uitvoering",

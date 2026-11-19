@@ -41,11 +41,25 @@ class JobManagementTests(unittest.TestCase):
         with patch(
             "api.services.jobs.subprocess.Popen", return_value=process
         ) as factory:
-            self.manager._execute(job["id"])
+            self.manager._execute(job)
         process.kill.assert_called_once()
+        self.assertEqual(process.communicate.call_args_list[0].kwargs, {"timeout": 1})
         self.assertNotIn("shell", factory.call_args.kwargs)
         self.assertEqual(factory.call_args.args[0][-1], job["id"])
         self.assertEqual(self.store.job(job["id"])["status"], "FAILED")
+
+    def test_sql_runs_allow_ten_minutes_for_each_comparison_and_benchmark_query(self):
+        for query_id in ("top_products", "top_customers"):
+            with self.subTest(query=query_id):
+                job = self.store.create_job(
+                    "run", {"mode": "validate", "query_id": query_id}
+                )
+                process = Mock()
+                process.communicate.return_value = ("", "")
+                self.manager.slots.acquire()
+                with patch("api.services.jobs.subprocess.Popen", return_value=process):
+                    self.manager._execute(job)
+                process.communicate.assert_called_once_with(timeout=7_500)
 
     def test_interrupted_jobs_do_not_resume_silently(self):
         job = self.store.create_job("test", {"suite": "selection"})
@@ -60,7 +74,7 @@ class JobManagementTests(unittest.TestCase):
         process.communicate.return_value = ("", "")
         self.manager.slots.acquire()
         with patch("api.services.jobs.subprocess.Popen", return_value=process):
-            self.manager._execute(job["id"])
+            self.manager._execute(job)
         self.assertEqual(self.store.job(job["id"])["status"], "FAILED")
 
     def test_failed_task_does_not_leave_a_running_phase_visible(self):

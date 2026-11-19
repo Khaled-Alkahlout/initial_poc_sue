@@ -38,7 +38,7 @@ test("overview, queries and stored analysis history load together", async ({
     workspace.getByRole("region", { name: "Optimized SQL Query", exact: true }),
   ).toBeVisible();
   await expect(
-    workspace.getByRole("button", { name: "Analyze with AI", exact: true }),
+    workspace.getByRole("button", { name: "Analyse starten", exact: true }),
   ).toBeDisabled();
   await page.screenshot({
     path: "test-results/api-history-recovered.png",

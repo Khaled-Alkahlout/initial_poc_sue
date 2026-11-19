@@ -108,8 +108,58 @@ test("mislukte benchmark toont de eerder gemeten correctheid en geen verbetering
   expect(screen.queryByText("Gevalideerde verbetering")).toBeNull();
   await user.click(screen.getByText("Resultaten per parameterset"));
   expect(
-    screen.getByRole("row", { name: /big\/full 3 3 Kolommen/ }),
+    screen.getByRole("row", { name: /big\/full 3 3 .*Kolommen/ }),
   ).toBeVisible();
+});
+
+test("duur per correctheidsproef en benchmarkpoging is uitklapbaar", async () => {
+  const user = userEvent.setup();
+  const row = attempt({
+    parameter_checks: [
+      {
+        label: "big/full",
+        status: "EQUIVALENT",
+        detail: "Gelijke resultaten",
+        original_rows: 3,
+        proposed_rows: 3,
+        original_ms: 1250,
+        proposed_ms: 500,
+        duration_ms: 1800,
+      },
+    ],
+    benchmark: {
+      ...attempt().benchmark,
+      repetitions: 3,
+      measurements: [
+        {
+          repetition: 1,
+          first_query: "original",
+          original_ms: 2400,
+          proposed_ms: 1000,
+          duration_ms: 3500,
+          status: "passed",
+        },
+        {
+          repetition: 2,
+          first_query: "proposed",
+          original_ms: null,
+          proposed_ms: 600000,
+          duration_ms: 600000,
+          status: "error",
+        },
+      ],
+    },
+  });
+  render(<OptimizationResults attempt={row} />);
+  expect(screen.getByText("1,3 s")).not.toBeVisible();
+  expect(screen.getByText("2,4 s")).not.toBeVisible();
+  await user.click(screen.getByText("Resultaten per parameterset"));
+  await user.click(screen.getByText("Benchmarkpogingen"));
+  expect(screen.getByText("1,3 s")).toBeVisible();
+  expect(screen.getByText("2,4 s")).toBeVisible();
+  expect(screen.getByText("3,5 s")).toBeVisible();
+  expect(screen.getByText("Afgebroken")).toBeVisible();
+  expect(screen.getByText("Niet vastgelegd")).toBeVisible();
 });
 
 test("technical disclosure retains recorded usage, cost basis and long redacted plans", async () => {

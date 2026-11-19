@@ -16,8 +16,8 @@ export default async function Page() {
     <div className="stack">
       <PageHeader
         eyebrow="POC / SINGLE-AGENT PIPELINE"
-        title="Pipeline-runs"
-        description="Bekijk opgeslagen experimenten of start een gecontroleerde uitvoering. Replays worden nooit als nieuwe model- of performancemetingen gepresenteerd."
+        title="Analysehistorie"
+        description="Start een SQL-analyse met gekozen modelcontext en bekijk de bijbehorende testresultaten."
         action={<StartRun queries={queries.queries} system={system} />}
       />
       <Card>

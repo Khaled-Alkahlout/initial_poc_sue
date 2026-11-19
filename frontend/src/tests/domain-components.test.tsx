@@ -140,6 +140,21 @@ describe("SQL en fases", () => {
     render(<ContextViewer attempt={attempt()} />);
     expect(screen.getByText("Niet beschikbaar")).toBeInTheDocument();
   });
+  test("nieuwe analyses tonen de verstuurde systeemprompt en userprompt", async () => {
+    const user = userEvent.setup();
+    render(
+      <ContextViewer
+        attempt={attempt({
+          system_prompt: "Vaste SQL-instructies",
+          user_prompt: '{"query":"SELECT 1"}',
+        })}
+      />,
+    );
+    await user.click(screen.getByText("Verstuurde systeemprompt"));
+    await user.click(screen.getByText("Verstuurde userprompt"));
+    expect(screen.getByText("Vaste SQL-instructies")).toBeVisible();
+    expect(screen.getByText('{"query":"SELECT 1"}')).toBeVisible();
+  });
 });
 describe("Development en fouttoestanden", () => {
   test("matrix toont ontbrekende verwachtingen en filterbare technische fouten", async () => {

@@ -16,13 +16,25 @@ export function ContextViewer({ attempt }: { attempt: Attempt }) {
   return (
     <Card>
       <CardHeader
-        title="Context voor het model"
+        title="Prompts en modelcontext"
         description={
           conditionLabels[attempt.condition ?? ""] ??
-          "Contextconditie niet vastgelegd"
+          "Modelcontext niet vastgelegd"
         }
       />
       <div className="panel-body context-grid">
+        {attempt.system_prompt && (
+          <details className="context-item inspector">
+            <summary>Verstuurde systeemprompt</summary>
+            <pre tabIndex={0}>{attempt.system_prompt}</pre>
+          </details>
+        )}
+        {attempt.user_prompt && (
+          <details className="context-item inspector">
+            <summary>Verstuurde userprompt</summary>
+            <pre tabIndex={0}>{attempt.user_prompt}</pre>
+          </details>
+        )}
         {attempt.context.length === 0 && (
           <p className="muted text-sm">
             Geen context opgeslagen voor deze poging.

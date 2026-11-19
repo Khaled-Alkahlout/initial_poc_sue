@@ -63,17 +63,26 @@ def integer(row: dict, key: str) -> int | None:
 
 
 def context_sections(prompt: str | None, condition: str | None) -> list[ContextSection]:
-    sections = {}
-    if prompt:
-        for title, body in re.findall(
-            r"^## (.*?)\r?\n```[^\n]*\n(.*?)```", prompt, re.M | re.S
-        ):
-            sections[title.strip()] = body.rstrip()
+    try:
+        sections = json.loads(prompt) if prompt else None
+    except ValueError:
+        sections = None
+    structured = isinstance(sections, dict)
+    if not structured:
+        markdown = {
+            title.strip(): body.rstrip()
+            for title, body in re.findall(
+                r"^## (.*?)\r?\n```[^\n]*\n(.*?)```", prompt or "", re.M | re.S
+            )
+        }
+        sections = {key: markdown.get(label) for key, label in HEADERS.items()}
     level = CONDITIONS.index(condition) if condition in CONDITIONS else -1
     result = []
     for index, (key, label) in enumerate(HEADERS.items()):
-        body = sections.get(label)
-        if body is None:
+        body = sections.get(key)
+        if structured and key == "plan":
+            label = "Geschat queryplan (EXPLAIN)"
+        if not isinstance(body, str):
             omitted = level >= 0 and index > level
             result.append(
                 ContextSection(
@@ -161,11 +170,20 @@ def adapt_attempt(
 
     original = CASE_MAP.get(query_id)
     proposed, extraction_error = None, None
+    structured_response = (
+        response is not None and response.get("response_schema_version") == 2
+    )
     if response:
-        from llm.analysis import legacy_sql, AnalysisError
+        from llm.analysis import legacy_sql, parse_rewrite, AnalysisError
 
         try:
-            proposed = legacy_sql(response)
+            if structured_response:
+                text = response.get("text")
+                proposed = parse_rewrite(
+                    text if isinstance(text, str) else ""
+                ).optimized_sql
+            else:
+                proposed = legacy_sql(response)
         except AnalysisError as exc:
             extraction_error = str(exc)
             outcome, correctness = "error", "skipped"
@@ -199,6 +217,7 @@ def adapt_attempt(
         proposed_iqr_ms=number(row, "cand_iqr_ms"),
         speedup=number(row, "speedup"),
         repetitions=integer(row, "reps"),
+        measurements=row.get("benchmark_measurements", []),
         reduction_percent=(1 - proposed_ms / original_ms) * 100
         if correctness == "passed" and measured and original_ms > 0
         else None,
@@ -291,19 +310,25 @@ def adapt_attempt(
             )
         except sqlglot.errors.SqlglotError:
             unchanged = None
-    explanation = (
-        response.get("text")
-        if response and isinstance(response.get("text"), str)
-        else None
+    explanation = (response or {}).get(
+        "rewrite_explanation" if structured_response else "text"
     )
     return Attempt(
         diagnostics={
             "structured_parse_success": False,
-            "error_code": "legacy_sql_invalid",
+            "error_code": "schema_validation_failed"
+            if structured_response
+            else "legacy_sql_invalid",
         }
         if extraction_error
         else {},
-        validation_state="rewrite_parsing_failed" if extraction_error else None,
+        validation_state=(
+            "rewrite_parsing_failed"
+            if extraction_error
+            else "no_rewrite_proposed"
+            if verdict == "NO_REWRITE_PROPOSED"
+            else None
+        ),
         id=f"{run_id}~{index}",
         run_id=run_id,
         query_id=query_id,
@@ -316,7 +341,9 @@ def adapt_attempt(
         correctness=correctness,
         original_sql=original.original if original else None,
         proposed_sql=redact(proposed, literals=True) if proposed else None,
-        explanation=redact(explanation, literals=True)[:20000] if explanation else None,
+        explanation=redact(explanation, literals=True)[:20000]
+        if isinstance(explanation, str)
+        else None,
         detail=redact(detail),
         parameter_sets=sets,
         failing_parameter_sets=failing,
@@ -336,6 +363,9 @@ def adapt_attempt(
 def summarize(run: RunDetail) -> RunDetail:
     attempts = run.attempts
     run.query_ids = sorted({a.query_id for a in attempts}) or run.query_ids
+    run.conditions = [
+        name for name in CONDITIONS if any(a.condition == name for a in attempts)
+    ] or run.conditions
     run.attempt_count = len(attempts)
     run.accepted_count = sum(a.outcome == "accepted" for a in attempts)
     run.issue_count = sum(

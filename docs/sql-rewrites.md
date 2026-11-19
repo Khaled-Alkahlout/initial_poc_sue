@@ -8,7 +8,7 @@ Another saved top_products analysis (`301eafa1-7680-4b8b-9c90-3b888cd72269`) exp
 
 The evidence supports an explicit null decision, rather than truncation, static rejection, persistence loss or a frontend field mismatch. Prompt caution is a plausible contributor, not a proven account of the model's internal decision. The exact run did not save a dedicated no-rewrite reason or its original raw provider content, so alternate content elsewhere in that provider response cannot be independently reconstructed. The strict old parser would have rejected unexpected top-level fields rather than quietly extracting them.
 
-The separate legacy experiment path uses a different prompt (including returning the original SQL when no improvement is found), fenced text and an artifact `sql` field. Historical artifacts contain SQL and render through that adapter. They are distinct from the structured Analysis Workspace path.
+Historical CLI experiments used a separate prompt and fenced SQL output. New CLI and dashboard analyses share `llm.client.SYSTEM`, the JSON user-context builder and response schema v2. Saved Markdown prompts and fenced responses load through the historical adapters.
 
 ## Contract and compatibility
 
@@ -29,7 +29,7 @@ Malformed structured responses never fall back to legacy text parsing. Multiple 
 
 ## Manual action and diagnostics
 
-The Analysis Workspace's **Generate SQL Rewrite** action sends one explicit analysis request with `rewrite_only: true` and the selected stored source ID. The backend verifies the source belongs to the query, reuses its redacted context and bottleneck diagnosis, and includes its prior candidate/outcome. Source analyses are immutable; each new request gets its own history record. Duplicate in-flight analysis requests remain blocked. The existing external-model consent control applies; the action never executes SQL or retries automatically.
+The Analysis Workspace's **Opnieuw analyseren met eerdere uitkomst** action sends one analysis request with `rewrite_only: true` and the selected stored source ID. The backend verifies the source belongs to the query and includes its diagnosis, candidate and outcome in the user context. The selected context level and test step also apply to this action. Each request gets a history record with its exact system and user prompts. The system message is identical to other SQL analyses.
 
 The SQL panels show original and proposed SQL with Prism highlighting and copy actions, before the longer diagnosis. No-rewrite, parsing error, static rejection, request failure and awaiting-validation states are distinct. Old analyses explicitly say when a specific rewrite decision was not recorded.
 

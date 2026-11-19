@@ -226,7 +226,7 @@ class AnalysisWorkflowTests(unittest.TestCase):
             {
                 "mode": "analysis",
                 "query_id": "top_products",
-                "condition": "C4_stats",
+                "condition": "C1_query",
                 "confirm_external_model": True,
                 **values,
             },

@@ -28,7 +28,7 @@ test("AI-analyse vraagt bevestiging, voert geen SQL uit en blijft in de workspac
       system={config}
     />,
   );
-  const button = screen.getByRole("button", { name: "Analyze with AI" });
+  const button = screen.getByRole("button", { name: "Analyse starten" });
   expect(button).toBeDisabled();
   await user.click(screen.getByRole("checkbox"));
   await user.click(button);
@@ -80,6 +80,9 @@ test("volledige run vereist bevestiging voor zowel de database als het model", a
       external_model: true,
     },
   );
+  config.run_modes = config.run_modes.map((mode) =>
+    mode.id === "validate" ? { ...mode, available: true } : mode,
+  );
   const start = vi
     .spyOn(api, "startRun")
     .mockResolvedValue({ ...run(), mode: "live" });
@@ -89,16 +92,69 @@ test("volledige run vereist bevestiging voor zowel de database als het model", a
       system={config}
     />,
   );
-  await user.click(
-    screen.getByRole("checkbox", { name: /begrensde benchmark/ }),
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "Na de analyse" }),
+    "test",
   );
-  const submit = screen.getByRole("button", { name: "Analyseer en valideer" });
+  await user.click(
+    screen.getByRole("checkbox", { name: /correctheidscontrole en benchmark/ }),
+  );
+  const submit = screen.getByRole("button", { name: "Analyse starten" });
   expect(submit).toBeDisabled();
   await user.click(screen.getByRole("checkbox", { name: /extern AI-request/ }));
   await user.click(submit);
   expect(start).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({
       mode: "live",
+      condition: "C4_stats",
+      confirm_sql: true,
+      confirm_external_model: true,
+    }),
+  );
+});
+
+test("schema kan worden meegestuurd terwijl het voorstel alleen wordt opgeslagen", async () => {
+  const user = userEvent.setup();
+  const config = system();
+  config.run_modes.push({
+    id: "analysis",
+    label: "SQL-analyse",
+    available: true,
+    reason: "",
+    executes_sql: false,
+    external_model: true,
+  });
+  config.run_modes = config.run_modes.map((mode) =>
+    mode.id === "validate" ? { ...mode, available: true } : mode,
+  );
+  const request = vi
+    .spyOn(api, "startRun")
+    .mockResolvedValue({ ...run(), mode: "analysis" });
+  render(
+    <AnalysisWorkspace
+      query={{ ...query(), runs: [], attempts: [] }}
+      system={config}
+    />,
+  );
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "Context voor het model" }),
+    "C2_schema",
+  );
+  expect(screen.getByRole("combobox", { name: "Na de analyse" })).toHaveValue(
+    "save",
+  );
+  await user.click(screen.getByRole("checkbox", { name: /extern AI-request/ }));
+  expect(
+    screen.getByRole("button", { name: "Analyse starten" }),
+  ).toBeDisabled();
+  await user.click(
+    screen.getByRole("checkbox", { name: /gekozen metadata op/ }),
+  );
+  await user.click(screen.getByRole("button", { name: "Analyse starten" }));
+  expect(request).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      mode: "analysis",
+      condition: "C2_schema",
       confirm_sql: true,
       confirm_external_model: true,
     }),
@@ -113,7 +169,7 @@ test("ontbrekende providerconfiguratie geeft uitleg en geen modelrequest", () =>
     />,
   );
   expect(
-    screen.getByRole("button", { name: "Analyze with AI" }),
+    screen.getByRole("button", { name: "Analyse starten" }),
   ).toBeDisabled();
   expect(
     screen.getByText("OpenRouter nog niet geconfigureerd."),
@@ -153,7 +209,7 @@ test("gerichte rewrite vraagt één nieuw verzoek met de opgeslagen analyse als 
     />,
   );
   const button = await screen.findByRole("button", {
-    name: "Generate SQL Rewrite",
+    name: "Opnieuw analyseren met eerdere uitkomst",
   });
   expect(button).toBeDisabled();
   await user.click(screen.getByRole("checkbox"));

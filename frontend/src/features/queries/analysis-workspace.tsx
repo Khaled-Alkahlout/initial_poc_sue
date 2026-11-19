@@ -4,13 +4,19 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Sparkles } from "lucide-react";
 import { api, errorMessage } from "@/lib/api/client";
-import type { QueryDetail, Run, SystemStatus } from "@/lib/api/contracts";
+import type {
+  QueryDetail,
+  Run,
+  RunInput,
+  SystemStatus,
+} from "@/lib/api/contracts";
 import { compareBenchmark } from "@/lib/benchmark";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { ErrorState } from "@/components/shared/states";
 import { SqlViewer } from "@/components/queries/sql-viewer";
 import { RunDetail } from "@/features/runs/run-detail";
+import { AnalysisOptions } from "@/features/runs/analysis-options";
 
 export function AnalysisWorkspace({
   query,
@@ -27,9 +33,14 @@ export function AnalysisWorkspace({
   const [requestError, setRequestError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const capability = system.run_modes.find((mode) => mode.id === "analysis");
-  const fullRun = system.run_modes.find(
-    (mode) => mode.id === "live" && mode.available,
+  const databaseAvailable = system.run_modes.some(
+    (mode) => mode.id === "validate" && mode.available,
   );
+  const [condition, setCondition] = useState<RunInput["condition"]>(
+    databaseAvailable ? "C4_stats" : "C1_query",
+  );
+  const [testAfter, setTestAfter] = useState(false);
+  const needsDatabase = condition !== "C1_query" || testAfter;
   const storedAnalysisId = query.runs.find(
     (item) => item.mode === "analysis" || item.mode === "live",
   )?.id;
@@ -80,18 +91,24 @@ export function AnalysisWorkspace({
   }, [previousRunId, reload]);
 
   async function start(rewriteOnly = false) {
-    if (busy || pending || !consent || !capability?.available) return;
-    const validate = !rewriteOnly && !!fullRun && confirmSql;
+    if (
+      busy ||
+      pending ||
+      !consent ||
+      !capability?.available ||
+      (needsDatabase && (!databaseAvailable || !confirmSql))
+    )
+      return;
     setBusy(true);
     setRequestError(null);
     try {
       setRun(
         await api.startRun({
-          mode: validate ? "live" : "analysis",
+          mode: testAfter ? "live" : "analysis",
           ...(rewriteOnly ? { rewrite_only: true, source_id: run?.id } : {}),
           query_id: query.query_id,
-          condition: validate ? "C4_stats" : "C1_query",
-          confirm_sql: validate,
+          condition,
+          confirm_sql: needsDatabase && confirmSql,
           confirm_external_model: consent,
         }),
       );
@@ -109,8 +126,8 @@ export function AnalysisWorkspace({
     <section className="stack" aria-label="AI Analysis Workspace">
       <Card className="analysis-controls">
         <CardHeader
-          title="Analyze with AI"
-          description="Analyseer de query en genereer een onderbouwd SQL-voorstel."
+          title="SQL-analyse"
+          description="Kies de modelcontext en de teststap voor deze query."
           action={
             system.configured_model && (
               <Link
@@ -126,6 +143,16 @@ export function AnalysisWorkspace({
         <div className="panel-body">
           {capability?.available ? (
             <>
+              <AnalysisOptions
+                system={system}
+                condition={condition}
+                onConditionChange={setCondition}
+                testAfter={testAfter}
+                onTestAfterChange={setTestAfter}
+                confirmDatabase={confirmSql}
+                onConfirmDatabaseChange={setConfirmSql}
+                disabled={busy || pending}
+              />
               <label className="check-field">
                 <input
                   type="checkbox"
@@ -133,43 +160,32 @@ export function AnalysisWorkspace({
                   onChange={(event) => setConsent(event.target.checked)}
                 />
                 <span>
-                  Ik bevestig één extern AI-request met de casus-SQL en
-                  mogelijke kosten. Bij een volledige run gaat ook beperkte
-                  testdatabasemetadata mee.
+                  Ik bevestig één extern AI-request met de gekozen SQL en
+                  context en mogelijke kosten.
                 </span>
               </label>
-              {fullRun && (
-                <label className="check-field">
-                  <input
-                    type="checkbox"
-                    checked={confirmSql}
-                    onChange={(event) => setConfirmSql(event.target.checked)}
-                  />
-                  <span>
-                    Ik bevestig ook correctheidscontrole en een begrensde
-                    benchmark op de geïsoleerde testdatabase.
-                  </span>
-                </label>
-              )}
               <div className="page-actions">
                 <Button
                   onClick={() => start()}
-                  disabled={busy || pending || !consent}
+                  disabled={
+                    busy ||
+                    pending ||
+                    !consent ||
+                    (needsDatabase && !confirmSql)
+                  }
                 >
                   <Sparkles size={16} />{" "}
-                  {busy
-                    ? "Analyse starten…"
-                    : fullRun && confirmSql
-                      ? "Analyseer en valideer"
-                      : "Analyze with AI"}
+                  {busy ? "Analyse starten…" : "Analyse starten"}
                 </Button>
                 {canRewrite && (
                   <Button
                     variant="outline"
                     onClick={() => start(true)}
-                    disabled={busy || !consent}
+                    disabled={
+                      busy || !consent || (needsDatabase && !confirmSql)
+                    }
                   >
-                    Generate SQL Rewrite
+                    Opnieuw analyseren met eerdere uitkomst
                   </Button>
                 )}
               </div>
@@ -177,7 +193,7 @@ export function AnalysisWorkspace({
           ) : (
             <div className="analysis-unavailable">
               <Button disabled>
-                <Sparkles size={16} /> Analyze with AI
+                <Sparkles size={16} /> Analyse starten
               </Button>
               <p className="muted text-sm">
                 {system.configuration_error ??

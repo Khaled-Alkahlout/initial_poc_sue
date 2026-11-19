@@ -88,7 +88,7 @@ def stats_text(conn, tables, columns):
     return "\n".join(out)
 
 
-def build_context(conn, case, ctx, condition: str) -> dict:
+def build_context(conn, case, ctx, condition: str, *, recent_order_limit=None) -> dict:
     """Adapt the package's C1–C4 context to approved, bounded metadata reads."""
     level = CONDITIONS.index(condition)
     query = inspect_sql(case.original)
@@ -100,7 +100,12 @@ def build_context(conn, case, ctx, condition: str) -> dict:
         require_tables(conn, query.tables | ({"orders"} if needs_profile else set()))
         blocks["schema"] = schema_text(conn, query.tables)
         if level >= 2:
-            timing = case.timing_params(make_ctx(conn) if needs_profile else ctx)
+            profile = (
+                make_ctx(conn, recent_order_limit=recent_order_limit)
+                if needs_profile
+                else ctx
+            )
+            timing = case.timing_params(profile)
             if set(timing) != query.parameters:
                 raise ValueError(
                     "Het parameterprofiel voor het queryplan is onvolledig."

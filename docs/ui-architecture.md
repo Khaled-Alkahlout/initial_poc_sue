@@ -142,8 +142,13 @@ sequenceDiagram
 | Offline mock        | C1-casus met een kopie van de originele SQL en statische controle.                                                                  |
 | Testdatabase + mock | Dezelfde SQL aan beide kanten van de validator, als expliciete A/A-controle.                                                        |
 | Live                | Gestructureerde OpenRouter-analyse gevolgd door validatie op de bevestigde testdatabase.                                             |
-| AI-analyse          | Eén gestructureerd OpenRouter-request zonder database; advies blijft ongetest.                                                     |
+| AI-analyse          | Eén gestructureerd OpenRouter-request met de gekozen context. Metadata kan uit de bevestigde testdatabase komen. Het voorstel wordt opgeslagen. |
 | Voorstelvalidatie   | Afzonderlijk opgeslagen voorstel testen na SQL-gates; geen nieuw modelrequest.                                                     |
+
+Het startscherm biedt één SQL-analyse met twee afzonderlijke keuzes. **Context
+voor het model** bepaalt de userprompt. **Na de analyse** bepaalt of correctheid
+en performance worden getest. Alle SQL-modelaanroepen delen dezelfde
+systeemprompt. Nieuwe dashboardresultaten bewaren beide verstuurde prompts.
 
 Het Explorer-budget geldt voor de getoonde selectie. Een expliciete run kiest
 één fixture en past top-1-selectie toe op die gekozen subset. Iedere run bewaart
@@ -184,8 +189,10 @@ Na nieuwe externe CLI-experimenten is een API-herstart nodig om die bestanden
 te importeren. Nieuwe dashboardtaken en reviews staan apart in `.local/`, dat
 door Git wordt genegeerd. Reviews wijzigen nooit technische resultaatrecords.
 
-Eén API-worker, één actief workerproces, één wachtende taak en een taaklimiet van
-300 seconden begrenzen de lokale uitvoering. Een herstart markeert onderbroken
+Eén API-worker, één actief workerproces en één wachtende taak begrenzen de lokale
+uitvoering. De taaklimiet is 300 seconden. Voor runs met SQL-validatie geldt
+2 uur en 5 minuten voor maximaal drie vergelijkingsparen en drie benchmarkparen
+met maximaal tien minuten per query. Een herstart markeert onderbroken
 taken als mislukt; geen stilzwijgende hervatting. Alleen vaste cases en suites
 zijn toegestaan. Processen gebruiken geen shell; credentials staan niet in argv.
 

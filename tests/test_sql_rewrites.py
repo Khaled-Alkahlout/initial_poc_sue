@@ -20,6 +20,7 @@ from llm.analysis import (
     parse_analysis,
     unchanged_sql,
 )
+from llm.client import SYSTEM, build_prompt, call_llm
 from test_ai_analysis import DOCUMENT, ENV
 
 CASE = CASE_MAP["top_products"]
@@ -95,18 +96,30 @@ class ResponseContractTests(unittest.TestCase):
         )
         self.assertEqual(failed.validation_state, "rewrite_parsing_failed")
 
-    def test_new_schema_and_focused_prompt_use_same_model_and_no_retry(self):
+    def test_shared_system_prompt_for_cli_and_dashboard_with_each_context(self):
+        context = {"query": CASE.original}
         with (
             patch.dict(os.environ, ENV),
             patch(
                 "llm.analysis.chat", return_value={"text": json.dumps(document())}
             ) as chat,
         ):
-            result, metadata = analyze(
-                {"query": CASE.original, "known_bottlenecks": "DISTINCT sorting"},
-                focused=True,
-            )
-        chat.assert_called_once()
+            for key, value in (
+                ("query", CASE.original),
+                ("schema", "TABLE orders"),
+                ("plan", "Estimated join"),
+                ("stats", "Estimated rows"),
+                ("known_bottlenecks", "DISTINCT sorting"),
+            ):
+                context[key] = value
+                result, metadata = analyze(context)
+                dashboard_messages = chat.call_args.args[0]
+                call_llm(build_prompt(context), ENV["SUE_MODEL"])
+                cli_messages = chat.call_args.args[0]
+                self.assertEqual(dashboard_messages, cli_messages)
+                self.assertEqual(cli_messages[0], {"role": "system", "content": SYSTEM})
+                self.assertEqual(json.loads(cli_messages[1]["content"]), context)
+        self.assertEqual(chat.call_count, 10)
         self.assertEqual(chat.call_args.args[1], ENV["SUE_MODEL"])
         schema = chat.call_args.kwargs["schema"]
         self.assertEqual(next(iter(schema["properties"])), "optimized_sql")
@@ -160,7 +173,7 @@ class RewriteWorkflowTests(unittest.TestCase):
             {
                 "mode": "analysis",
                 "query_id": CASE.name,
-                "condition": "C4_stats",
+                "condition": "C1_query",
                 "confirm_external_model": True,
                 **changes,
             },
@@ -206,7 +219,7 @@ class RewriteWorkflowTests(unittest.TestCase):
             document(optimized_sql=None, rewrite_status="no_safe_rewrite")
         )
         focused, call = self.execute(rewrite_only=True, source_id=original["id"])
-        self.assertTrue(call.call_args.kwargs["focused"])
+        self.assertNotIn("focused", call.call_args.kwargs)
         blocks = call.call_args.args[0]
         self.assertEqual(blocks["query"], CASE.original)
         self.assertEqual(blocks["known_bottlenecks"], DOCUMENT["root_cause"])
@@ -221,7 +234,7 @@ class RewriteWorkflowTests(unittest.TestCase):
             {
                 "mode": "analysis",
                 "query_id": CASE.name,
-                "condition": "C4_stats",
+                "condition": "C1_query",
                 "confirm_external_model": True,
             },
         )

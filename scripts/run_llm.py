@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from cases.cases import CASES  # noqa: E402
 from cases.classes.candidate import Candidate  # noqa: E402
-from llm.client import SYSTEM, build_prompt, call_llm, extract_sql  # noqa: E402
+from llm.client import SYSTEM, build_prompt, call_llm  # noqa: E402
 from llm.context import CONDITIONS, build_context  # noqa: E402
 from query_selection.adapters import mock_telemetry, selected_cases  # noqa: E402
 from query_selection.policy import SelectionPolicy  # noqa: E402
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None):
     ap.add_argument("uri", nargs="?", help="verplicht behalve bij --selection-only")
     ap.add_argument("--model", default="claude-sonnet-5-5", help="Anthropic-modelnaam, of 'mock'")
     ap.add_argument("--reps", type=int, default=3, help="LLM-aanroepen per query per conditie")
-    ap.add_argument("--val-reps", type=int, choices=range(1, 13), default=6, help="meetparen per gelijkwaardige kandidaat")
+    ap.add_argument("--val-reps", type=int, choices=range(1, 13), default=3, help="meetparen per gelijkwaardige kandidaat, maximaal 3 uitgevoerd")
     ap.add_argument("--cases", nargs="*", default=[c.name for c in CASES])
     ap.add_argument("--conditions", nargs="*", default=CONDITIONS, choices=CONDITIONS)
     ap.add_argument("--dry-run", action="store_true", help="alleen prompts opslaan, geen LLM en geen validatie")
@@ -112,13 +112,28 @@ def main(argv: list[str] | None = None):
                     continue
                 for rep in range(1, args.reps + 1):
                     resp = call_llm(prompt, args.model, original_sql=case.original)
-                    sql = extract_sql(resp["text"])
+                    sql = resp["sql"]
                     tag = f"{case.name}__{cond}__r{rep}"
                     (out / "responses" / f"{tag}.json").write_text(
-                        json.dumps({**resp, "sql": sql, "model": args.model}, indent=2, ensure_ascii=False), encoding="utf-8")
-                    cand = Candidate(f"LLM_{cond}_r{rep}", sql, "unknown", "llm")
-                    unchanged = sql.strip() == case.original.strip()
-                    r = evaluate(conn, case, cand, None, args.val_reps)
+                        json.dumps({**resp, "model": args.model}, indent=2, ensure_ascii=False), encoding="utf-8")
+                    candidate_name = f"LLM_{cond}_r{rep}"
+                    unchanged = sql is not None and sql.strip() == case.original.strip()
+                    if sql is None:
+                        error = resp.get("rewrite_error")
+                        r = {
+                            "case": case.name,
+                            "candidate": candidate_name,
+                            "verdict": "REWRITE_PARSE_FAILED"
+                            if error else "NO_REWRITE_PROPOSED",
+                            "correctness_status": "skipped",
+                            "benchmark_status": "skipped",
+                            "detail": error or resp.get(
+                                "rewrite_explanation", "Geen SQL-voorstel ontvangen."
+                            ),
+                        }
+                    else:
+                        cand = Candidate(candidate_name, sql, "unknown", "llm")
+                        r = evaluate(conn, case, cand, None, args.val_reps)
                     r.update({"condition": cond, "rep": rep, "model": args.model, "unchanged": unchanged,
                               "input_tokens": resp["input_tokens"], "output_tokens": resp["output_tokens"],
                               "llm_seconds": resp["seconds"]})

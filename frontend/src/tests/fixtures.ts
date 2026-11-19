@@ -106,6 +106,8 @@ export const run = (): Run => ({
   limitations: ["Geen algemeen equivalentiebewijs."],
 });
 export const system = (): SystemStatus => ({
+  analysis_system_prompt:
+    "Je bent een PostgreSQL 16-expert. Geef JSON volgens schema_version=2.",
   api_status: "available",
   database_status: "not_checked",
   database_configured: false,
@@ -116,6 +118,14 @@ export const system = (): SystemStatus => ({
   historical_evaluations: 101,
   filter_available: true,
   run_modes: [
+    {
+      id: "validate",
+      label: "Opgeslagen voorstel testen",
+      available: false,
+      reason: "Testdatabase niet geconfigureerd.",
+      executes_sql: true,
+      external_model: false,
+    },
     {
       id: "replay",
       label: "Historische replay",

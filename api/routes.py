@@ -78,26 +78,38 @@ def run(run_id: str, request: Request):
 
 @router.post("/runs", response_model=RunDetail, status_code=202)
 def start_run(value: RunRequest, request: Request):
+    from api.services.analysis import uses_test_database_context
+
     catalog = request.app.state.catalog
+    config = value.model_dump()
     if value.rewrite_only:
         from api.services.analysis import rewrite_source
 
-        if value.mode != "analysis":
-            raise HTTPException(422, "Gerichte rewrite vereist analysis-modus.")
+        if value.mode not in {"analysis", "live"}:
+            raise HTTPException(
+                422, "Eerdere analyse meesturen vereist een nieuwe modelanalyse."
+            )
         try:
             rewrite_source(request.app.state.store, value.source_id, value.query_id)
         except AnalysisError as exc:
             raise HTTPException(422, str(exc)) from None
     if value.query_id not in CASE_MAP:
         raise HTTPException(422, "Alleen bestaande querycases zijn toegestaan.")
-    capability = next(
-        item for item in catalog.system().run_modes if item.id == value.mode
-    )
+    run_modes = {item.id: item for item in catalog.system().run_modes}
+    capability = run_modes[value.mode]
     if not capability.available:
         raise HTTPException(409, capability.reason)
-    if capability.executes_sql and not value.confirm_sql:
+    if (
+        value.mode == "analysis"
+        and uses_test_database_context(config)
+        and not run_modes["validate"].available
+    ):
+        raise HTTPException(409, run_modes["validate"].reason)
+    if (
+        capability.executes_sql or uses_test_database_context(config)
+    ) and not value.confirm_sql:
         raise HTTPException(
-            422, "Bevestig expliciet de SQL-uitvoering op de testdatabase."
+            422, "Bevestig expliciet de gekozen databasehandelingen op de testdatabase."
         )
     if capability.external_model and not value.confirm_external_model:
         raise HTTPException(
@@ -121,7 +133,6 @@ def start_run(value: RunRequest, request: Request):
             saved_proposal(request.app.state.store, value.source_id, value.query_id)
         except AnalysisError as exc:
             raise HTTPException(422, str(exc)) from None
-    config = value.model_dump()
     if capability.external_model:
         generation = request.app.state.store.generation_settings()
         try:

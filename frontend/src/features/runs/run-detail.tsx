@@ -170,6 +170,15 @@ export function RunDetail({
         </>
       )}
       {error && <ErrorState message={error} retry={refresh} />}
+      {(run.mode === "analysis" || run.mode === "live") && (
+        <p className="muted text-sm">
+          Modelcontext{" "}
+          {conditionLabels[attempt?.condition ?? ""] ?? "wordt voorbereid"}.
+          {run.mode === "live"
+            ? " Na de analyse volgen correctheidscontrole en benchmark op de testdatabase."
+            : " Het voorstel wordt opgeslagen voor beoordeling."}
+        </p>
+      )}
       {run.error && (
         <p role="alert" className="notice notice-error">
           {run.error}
@@ -308,7 +317,7 @@ export function RunDetail({
         showBenchmarkWarning={!measured || !compareBenchmark(measured)}
       />
       {run.mode === "analysis" && run.lifecycle === "FAILED" && (
-        <RetryAnalysis run={run} />
+        <RetryAnalysis run={run} system={system} />
       )}
       {validationEligible && <ValidateProposal run={run} system={system} />}
     </div>
