@@ -55,3 +55,35 @@ jobs:
         run: |
           docker tag sue-ai-tool:latest 710414398852.dkr.ecr.eu-north-1.amazonaws.com/sue-ai-tool:latest
           docker push 710414398852.dkr.ecr.eu-north-1.amazonaws.com/sue-ai-tool:latest
+
+
+      - name: Register new ECS task definition
+        shell: bash
+        run: |
+          IMAGE="710414398852.dkr.ecr.eu-north-1.amazonaws.com/sue-ai-tool:latest"
+
+          aws ecs describe-task-definition \
+            --task-definition sue-ai-tool \
+            --query taskDefinition \
+            --output json > current-task.json
+
+          jq --arg IMAGE "$IMAGE" '
+            {
+              family,
+              executionRoleArn,
+              networkMode,
+              containerDefinitions,
+              requiresCompatibilities,
+              cpu,
+              memory
+            }
+            | .containerDefinitions |= map(
+                if .name == "sue-ai-tool"
+                then .image = $IMAGE
+                else .
+                end
+              )
+          ' current-task.json > new-task.json
+
+          aws ecs register-task-definition \
+            --cli-input-json file://new-task.json
